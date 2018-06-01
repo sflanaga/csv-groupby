@@ -1,0 +1,22 @@
+[package]
+name = "csv"
+version = "0.1.0"
+authors = ["steve"]
+
+[profile.release]
+lto=true
+opt-level = 3
+#panic = 'abort'
+debug = false
+debug-assertions = false
+target-cpus='native'
+
+[[bin]]
+name = "csv"
+path = "src/csv.rs"
+
+[dependencies]
+csv = "1"
+regex = "1"
+prettytable-rs = "^0.6"
+
