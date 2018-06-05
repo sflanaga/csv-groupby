@@ -56,7 +56,7 @@ fn main() {
         match err.kind() {
             ErrorKind::BrokenPipe => println!("broken pipe"),
             _ => {
-                println!("error: of another kind {:?}", &err);
+                eprintln!("error: of another kind {:?}", &err);
                 std::process::exit(1);
             },
         }
@@ -72,9 +72,9 @@ fn main() {
 
 fn help(msg: &str) {
     if msg.len() > 0 {
-        println!("error: {}", msg);
+        eprintln!("error: {}", msg);
     }
-println!(r###"csv [options] file1... fileN
+eprintln!(r###"csv [options] file1... fileN
 csv [options] -i # read from standard input
     --help this help
     -i - read from stdin
@@ -86,13 +86,14 @@ csv [options] -i # read from standard input
     -a turn off table format - use csv format
     -d input_delimiter - single char
     -v - verbose
+    -vv - more verbose
     --nc - do not write record counts
     -r <RE> parse lines using regular expression and use sub groups as fields
 "###);
-    println!("version: {}", env!("CARGO_PKG_VERSION"));
-    println!("CARGO_MANIFEST_DIR: {}", env!("CARGO_MANIFEST_DIR"));
-    println!("CARGO_PKG_VERSION: {}", env!("CARGO_PKG_VERSION"));
-    println!("CARGO_PKG_HOMEPAGE: {}", env!("CARGO_PKG_HOMEPAGE"));
+    eprintln!("version: {}", env!("CARGO_PKG_VERSION"));
+    eprintln!("CARGO_MANIFEST_DIR: {}", env!("CARGO_MANIFEST_DIR"));
+    eprintln!("CARGO_PKG_VERSION: {}", env!("CARGO_PKG_VERSION"));
+    eprintln!("CARGO_PKG_HOMEPAGE: {}", env!("CARGO_PKG_HOMEPAGE"));
     // if built_info::GIT_VERSION.is_some() {
     //     println!("git rev: {}  build time: {}", built_info::GIT_VERSION.unwrap(),built_info::BUILT_TIME_UTC);
     //
@@ -108,11 +109,12 @@ fn csv() -> Result<(),std::io::Error> {
     let mut delimiter : char = ',';
     let mut od = ",".to_string();
     let mut auto_align: bool = true;
-    let mut verbose = false;
+    let mut verbose = 0;
     let mut hasheader = false;
     let mut write_record_count = true;
     let mut re_str = String::new();
     let mut read_stdin = false;
+    let mut EMPTY = "EMPTY".to_string();
 
     let argv : Vec<String> = args().skip(1).map( |x| x).collect();
     let filelist = &mut vec![];
@@ -160,8 +162,12 @@ fn csv() -> Result<(),std::io::Error> {
                 delimiter = argv[i].as_bytes()[0] as char;
             },
             "-v" => { // write out AsMut
-                verbose = true;
-                println!("writing stats and other info ON")
+                verbose = 1;
+                eprintln!("writing stats and other info ON")
+            },
+             "-vv" => { // write out AsMut
+                verbose = 2;
+                eprintln!("writing stats and other debug info ON")
             },
             "-h" => { // write out AsMut
                 hasheader = true;
@@ -170,7 +176,7 @@ fn csv() -> Result<(),std::io::Error> {
                 write_record_count = false;
             },
             x => {
-                if verbose { println!("adding filename {} to scan", x); }
+                if verbose>=1 { eprintln!("adding filename {} to scan", x); }
                 filelist.push(x);
             }
         }
@@ -187,15 +193,15 @@ fn csv() -> Result<(),std::io::Error> {
 
     let maxfield = 1;
 
-    if verbose {
-        println!("\tdelimiter: {}", delimiter);
-        println!("\theader: {}", hasheader);
-        println!("\tkey_fields: {:?}  len={}", key_fields, key_fields.len() );
-        println!("\tsum_fields: {:?}  len={}", sum_fields, sum_fields.len() );
-        println!("\tunique_fields: {:?}", unique_fields);
-        println!("\tfile list {:?}", filelist);
+    if verbose>=1 {
+        eprintln!("\tdelimiter: {}", delimiter);
+        eprintln!("\theader: {}", hasheader);
+        eprintln!("\tkey_fields: {:?}  len={}", key_fields, key_fields.len() );
+        eprintln!("\tsum_fields: {:?}  len={}", sum_fields, sum_fields.len() );
+        eprintln!("\tunique_fields: {:?}", unique_fields);
+        eprintln!("\tfile list {:?}", filelist);
         if filelist.len() <= 0 {
-            println!("\tprocessing stdin");
+            eprintln!("\tprocessing stdin");
         }
     }
 
@@ -233,7 +239,7 @@ fn csv() -> Result<(),std::io::Error> {
                 },
             };
 
-            if verbose { println!("file: {}", filename); }
+            if verbose>=1 { eprintln!("file: {}", filename); }
             let f = match OpenOptions::new()
                     .read(true)
                     .write(false)
@@ -283,7 +289,11 @@ fn csv() -> Result<(),std::io::Error> {
             let mut vcell = vec![];
             let z1: Vec<&str> = ff.split('|').collect();
             for x in &z1 {
-                vcell.push(Cell::new(x));
+                if x.len() <= 0 {
+                    vcell.push(Cell::new(&EMPTY));
+                } else {
+                    vcell.push(Cell::new(&x.to_string()));
+                }
             }
             // z1.iter().map( |x| { println!("{}", x); vcell.push(Cell::new(x));} );
             // //vcell.push(Cell::new(&ff));
@@ -325,7 +335,11 @@ fn csv() -> Result<(),std::io::Error> {
             let mut vcell = vec![];
             let z1: Vec<String> = ff.split('|').map( |x| x.to_string() ).collect();
             for x in &z1 {
-                vcell.push(format!("{}",x));
+                if x.len() <= 0 {
+                    vcell.push(format!("{}", EMPTY));
+                } else {
+                    vcell.push(format!("{}", x));
+                }
             }
             if write_record_count {
                 vcell.push(format!("{}",cc.count));
@@ -341,20 +355,18 @@ fn csv() -> Result<(),std::io::Error> {
     }
 
 
-    if verbose {
+    if verbose>=1 {
         let elapsed = start_f.elapsed();
         let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
         let rate : f64= (total_bytes as f64 / (1024f64*1024f64)) as f64 / sec;
-        if verbose {
-            println!("rows: {}  fields: {}  rate: {:.2}MB/s", total_rowcount, total_fieldcount, rate);
-        }
+        eprintln!("rows: {}  fields: {}  rate: {:.2}MB/s", total_rowcount, total_fieldcount, rate);
     }
     Ok( () )
 }
 
 
 fn process_re( re: &Regex, rdr: &mut BufRead, hm : &mut BTreeMap<String, KeySum>,
-    delimiter: char, key_fields : & Vec<usize>, sum_fields : & Vec<usize>, unique_fields: & Vec<usize>, header: bool, verbose: bool) -> (usize,usize,u64) {
+    delimiter: char, key_fields : & Vec<usize>, sum_fields : & Vec<usize>, unique_fields: & Vec<usize>, header: bool, verbose: u32) -> (usize,usize,u64) {
 
     let mut ss : String = String::with_capacity(256);
 
@@ -373,7 +385,9 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm : &mut BTreeMap<String, KeySum>
         bytecount += line.len() as u64 + 1;
         if let Some(record) = re.captures(line) {
             ss.clear();
-            // println!("{:?}  from: {}", &record, line);
+	    if verbose >= 2 {
+            eprintln!("DBG:  {:?}  from: {}", &record, line);
+	    }
             let mut i = 0;
             if key_fields.len() > 0 {
                 fieldcount += record.len();
@@ -405,8 +419,8 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm : &mut BTreeMap<String, KeySum>
                         let v = &record[index+1];
                         match v.parse::<f64>() {
                             Err(_) => {
-                                if verbose {
-                                    println!("error parseing string |{}| as a float for summary index: {} so pretending value is 0",v, index);
+                                if verbose>=1 {
+                                    eprintln!("error parseing string |{}| as a float for summary index: {} so pretending value is 0",v, index);
                                 }
                                 sum_grab.push(0f64);
                             },
@@ -468,7 +482,7 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm : &mut BTreeMap<String, KeySum>
 }
 
 fn process_csv(rdr: &mut BufRead, hm : &mut BTreeMap<String, KeySum>,
-    delimiter: char, key_fields : & Vec<usize>, sum_fields : & Vec<usize>, unique_fields: & Vec<usize>, header: bool, verbose: bool) -> (usize,usize,u64) {
+    delimiter: char, key_fields : & Vec<usize>, sum_fields : & Vec<usize>, unique_fields: & Vec<usize>, header: bool, verbose: u32) -> (usize,usize,u64) {
 
     let mut ss : String = String::with_capacity(256);
 
@@ -488,6 +502,9 @@ fn process_csv(rdr: &mut BufRead, hm : &mut BTreeMap<String, KeySum>,
         //
 
         let record : csv::StringRecord = result.unwrap();
+        if verbose >= 2 { 
+            eprintln!("DBG: rec: {:?}", record);
+        } 
         let pos = record.position().expect("a record position");
         bytecount = pos.byte();
         ss.clear();
@@ -519,8 +536,8 @@ fn process_csv(rdr: &mut BufRead, hm : &mut BTreeMap<String, KeySum>,
                     let v = &record[index];
                     match v.parse::<f64>() {
                         Err(_) => {
-                            if verbose {
-                                println!("error parseing string |{}| as a float for summary index: {} so pretending value is 0",v, index);
+                            if verbose>=0 {
+                                eprintln!("error parseing string |{}| as a float for summary index: {} so pretending value is 0",v, index);
                             }
                             sum_grab.push(0f64);},
                         Ok(vv) => sum_grab.push(vv),
@@ -546,7 +563,8 @@ fn process_csv(rdr: &mut BufRead, hm : &mut BTreeMap<String, KeySum>,
             }
         }
 
-        if ss.len() > 0 {
+        // if ss.len() > 0 
+        {
             rowcount += 1;
             fieldcount += record.len();
             {
