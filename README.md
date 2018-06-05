@@ -1,5 +1,7 @@
 # csv - cheesey select-group-by on delimited files.
 
+* Known bug - it does not report empty strings properly.
+
 csv is a command that takes a character delimited file [or stdin] and does a kind of 
 SQL select-group-by on delimited data as a table.
 
