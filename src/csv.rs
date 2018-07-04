@@ -93,6 +93,8 @@ csv [options] -i # read from standard input
     -vv - more verbose
     --nc - do not write record counts
     -r <RE> parse lines using regular expression and use sub groups as fields
+    -j <num> number of RE threads to spawn - default 3
+    -q <num> number queue-entries between line reader and re parser thread - default 1000
 "###);
     eprintln!("version: {}", env!("CARGO_PKG_VERSION"));
     eprintln!("CARGO_MANIFEST_DIR: {}", env!("CARGO_MANIFEST_DIR"));
@@ -119,6 +121,8 @@ fn csv() -> Result<(),std::io::Error> {
     let mut re_str = String::new();
     let mut read_stdin = false;
     let mut EMPTY = "EMPTY".to_string();
+    let mut re_threadno = 3;
+    let mut re_thread_qsize = 1000;
 
     let argv : Vec<String> = args().skip(1).map( |x| x).collect();
     let filelist = &mut vec![];
@@ -173,7 +177,15 @@ fn csv() -> Result<(),std::io::Error> {
                 verbose = 2;
                 eprintln!("writing stats and other debug info ON")
             },
-            "-h" => { // write out AsMut
+            "-j" => { // thread count 
+                i += 1;
+                re_threadno = argv[i].parse::<usize>().unwrap();
+            },
+            "-q" => { // qsize count 
+                i += 1;
+                re_thread_qsize = argv[i].parse::<usize>().unwrap();
+            },
+             "-h" => { // write out AsMut
                 hasheader = true;
             },
             "--nc" => { // just write the keys and not the row count
@@ -224,7 +236,7 @@ fn csv() -> Result<(),std::io::Error> {
         let stdin = std::io::stdin();
         let mut handle = stdin.lock();
         let (rowcount, fieldcount, bytecount) = if re_str.len() > 0 {
-            process_re(& regex, &mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose)
+            process_re(& regex, &mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose, re_threadno, re_thread_qsize)
         } else {
             process_csv(&mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose)
         };
@@ -255,7 +267,7 @@ fn csv() -> Result<(),std::io::Error> {
                     };
             let mut handle = BufReader::with_capacity(1024*1024*4,f);
             let (rowcount, fieldcount, bytecount) = if re_str.len() > 0 {
-                process_re(& regex, &mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose)
+                process_re(& regex, &mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose, re_threadno, re_thread_qsize)
             } else {
                 process_csv(&mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose)
             };
@@ -372,7 +384,7 @@ fn csv() -> Result<(),std::io::Error> {
 
 fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<BTreeMap<String, KeySum>>>,
     delimiter: char, key_fields : & Vec<usize>, sum_fields : & Vec<usize>, 
-    unique_fields: & Vec<usize>, header: bool, verbose: u32) -> (usize,usize,u64) {
+    unique_fields: & Vec<usize>, header: bool, verbose: u32, re_threadno: usize, re_thread_qsize: usize) -> (usize,usize,u64) {
 
     let mut skipped = 0u64;
     let mut bytecount = 0u64;
@@ -381,10 +393,9 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<BTreeMap<
     //
     //  setup worker threads for RE mode
     //
-    let no_threads = 4;
     let mut threadhandles = vec![];
-    let (send, recv): (Sender<Option<String>>, Receiver<Option<String>>) = chan::sync(4000);
-    for thrno in 0..no_threads { 
+    let (send, recv): (Sender<Option<String>>, Receiver<Option<String>>) = chan::sync(re_thread_qsize);
+    for thrno in 0..re_threadno{ 
         let clone_recv = recv.clone();
         let clone_arc = hm_arc.clone();
         let cloned_re = re.clone();
@@ -513,15 +524,16 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<BTreeMap<
     }
     
     //for result in recrdr.records() {
+    
     for line in rdr.lines() {
         let line = &line.unwrap();
         rowcount += 1;
         bytecount += line.len() as u64 + 1;
         let passline = Some(line.clone());
         send.send(passline);
-
     }
-    for i in 0..no_threads { send.send(None); }
+
+    for i in 0..re_threadno { send.send(None); }
     for h in threadhandles { h.join().unwrap(); }
     (rowcount, 0 /*fieldcount*/ , bytecount)
 }
