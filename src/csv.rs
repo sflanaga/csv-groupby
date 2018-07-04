@@ -424,8 +424,8 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<BTreeMap<
                 if let Some(record) = re.captures(line.as_str()) {
                     local_count += 1;
                     ss.clear();
-                    if verbose >= 2 {
-                        eprintln!("DBG:  {:?}  from: {}", &record, line);
+                    if verbose >= 3 {
+			eprintln!("DBG:  {:?}  from: {}", &record, line);
                     }
                     let mut i = 0;
                     if key_fields.len() > 0 {
@@ -518,7 +518,7 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<BTreeMap<
                 }
     
             }
-            if verbose > 0 { println!("threadid: {} parsed: {} lines and skipped: {}",thrno, local_count, skipped); }
+            if verbose > 0 { eprintln!("threadid: {} parsed: {} lines and skipped: {}",thrno, local_count, skipped); }
         });
         threadhandles.push(h);
     }
