@@ -20,5 +20,6 @@ csv = "1"
 regex = "1"
 prettytable-rs = "^0.6"
 chan = "0.1.21"
+fnv = "1.0.6"
 
 

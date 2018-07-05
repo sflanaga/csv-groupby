@@ -3,6 +3,7 @@ extern crate csv;
 extern crate prettytable;
 extern crate regex;
 extern crate chan;
+extern crate fnv;
 
 use chan::{Sender,Receiver};
 
@@ -32,6 +33,7 @@ use std::time::Instant;
 use std::collections::HashMap;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
+use fnv::FnvHashMap;
 use std::slice;
 
 use prettytable::Table;
@@ -39,6 +41,9 @@ use prettytable::row::Row;
 use prettytable::cell::Cell;
 use prettytable::format;
 
+
+//type MyMap<T1,T2> = HashMap<T1,T2>;
+type MyMap<T1,T2> = FnvHashMap<T1,T2>;
 
 use regex::Regex;
 
@@ -123,6 +128,7 @@ fn csv() -> Result<(),std::io::Error> {
     let mut EMPTY = "EMPTY".to_string();
     let mut re_threadno = 3;
     let mut re_thread_qsize = 1000;
+    let mut noop_re = false;
 
     let argv : Vec<String> = args().skip(1).map( |x| x).collect();
     let filelist = &mut vec![];
@@ -191,6 +197,9 @@ fn csv() -> Result<(),std::io::Error> {
             "--nc" => { // just write the keys and not the row count
                 write_record_count = false;
             },
+            "--noop_re" => { // do nothing real in the re thread
+                noop_re = true;
+            },
             x => {
                 if verbose>=1 { eprintln!("adding filename {} to scan", x); }
                 filelist.push(x);
@@ -221,7 +230,7 @@ fn csv() -> Result<(),std::io::Error> {
         }
     }
 
-    let mut hm_arc : Arc<RwLock<BTreeMap<String, KeySum>>> = Arc::new(RwLock::new(BTreeMap::new()));
+    let mut hm_arc : Arc<RwLock<MyMap<String, KeySum>>> = Arc::new(RwLock::new(MyMap::default()));
 
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
@@ -236,7 +245,7 @@ fn csv() -> Result<(),std::io::Error> {
         let stdin = std::io::stdin();
         let mut handle = stdin.lock();
         let (rowcount, fieldcount, bytecount) = if re_str.len() > 0 {
-            process_re(& regex, &mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose, re_threadno, re_thread_qsize)
+            process_re(& regex, &mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose, re_threadno, re_thread_qsize, noop_re)
         } else {
             process_csv(&mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose)
         };
@@ -267,7 +276,7 @@ fn csv() -> Result<(),std::io::Error> {
                     };
             let mut handle = BufReader::with_capacity(1024*1024*4,f);
             let (rowcount, fieldcount, bytecount) = if re_str.len() > 0 {
-                process_re(& regex, &mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose, re_threadno, re_thread_qsize)
+                process_re(& regex, &mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose, re_threadno, re_thread_qsize, noop_re)
             } else {
                 process_csv(&mut handle, &mut hm_arc, delimiter, & key_fields, & sum_fields, & unique_fields, hasheader, verbose)
             };
@@ -301,8 +310,9 @@ fn csv() -> Result<(),std::io::Error> {
             let mut row = Row::new(vcell);
             table.set_titles(row);
         }
-
-        for (ff,cc) in hm.iter() {
+        let mut thekeys :Vec<_> = hm.iter().map(|(k,v)| k).collect();
+        thekeys.sort_unstable();
+        for ff in thekeys.iter() {
             let mut vcell = vec![];
             let z1: Vec<&str> = ff.split('|').collect();
             for x in &z1 {
@@ -314,6 +324,9 @@ fn csv() -> Result<(),std::io::Error> {
             }
             // z1.iter().map( |x| { println!("{}", x); vcell.push(Cell::new(x));} );
             // //vcell.push(Cell::new(&ff));
+            let cc = hm.get(*ff).unwrap();
+            
+
             if write_record_count {
                 vcell.push(Cell::new(&format!("{}",cc.count)));
             }
@@ -348,7 +361,9 @@ fn csv() -> Result<(),std::io::Error> {
             // let mut row = Row::new(vcell);
             // table.set_titles(row);
         }
-        for (ff,cc) in hm.iter() {
+        let mut thekeys :Vec<_> = hm.iter().map(|(k,v)| k).collect();
+        thekeys.sort_unstable();
+        for ff in thekeys.iter() {
             let mut vcell = vec![];
             let z1: Vec<String> = ff.split('|').map( |x| x.to_string() ).collect();
             for x in &z1 {
@@ -358,6 +373,7 @@ fn csv() -> Result<(),std::io::Error> {
                     vcell.push(format!("{}", x));
                 }
             }
+            let cc = hm.get(*ff).unwrap();
             if write_record_count {
                 vcell.push(format!("{}",cc.count));
             }
@@ -382,14 +398,13 @@ fn csv() -> Result<(),std::io::Error> {
 }
 
 
-fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<BTreeMap<String, KeySum>>>,
+fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<String, KeySum>>>,
     delimiter: char, key_fields : & Vec<usize>, sum_fields : & Vec<usize>, 
-    unique_fields: & Vec<usize>, header: bool, verbose: u32, re_threadno: usize, re_thread_qsize: usize) -> (usize,usize,u64) {
+    unique_fields: & Vec<usize>, header: bool, verbose: u32, re_threadno: usize, re_thread_qsize: usize, noop_re: bool) -> (usize,usize,u64) {
 
     let mut skipped = 0u64;
     let mut bytecount = 0u64;
     let mut rowcount = 0usize;
-
     //
     //  setup worker threads for RE mode
     //
@@ -421,102 +436,104 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<BTreeMap<
                     Some(l) => { line = l; }
                     None => { break; }
                 }
-                if let Some(record) = re.captures(line.as_str()) {
-                    local_count += 1;
-                    ss.clear();
-                    if verbose >= 3 {
-			eprintln!("DBG:  {:?}  from: {}", &record, line);
-                    }
-                    let mut i = 0;
-                    if key_fields.len() > 0 {
-                        fieldcount += record.len();
-                        while i < key_fields.len() {
-                            let index = key_fields[i];
-                            if index+1 < record.len() {
-                                ss.push_str(&record[index+1]);
-                            } else {
-                                ss.push_str("NULL");
+                if !noop_re {               
+                    if let Some(record) = re.captures(line.as_str()) {
+                        local_count += 1;
+
+                        ss.clear();
+                        if verbose >= 3 {
+                            eprintln!("DBG:  {:?}  from: {}", &record, line);
+                        }
+                        let mut i = 0;
+                        if key_fields.len() > 0 {
+                            fieldcount += record.len();
+                            while i < key_fields.len() {
+                                let index = key_fields[i];
+                                if index+1 < record.len() {
+                                    ss.push_str(&record[index+1]);
+                                } else {
+                                    ss.push_str("NULL");
+                                }
+                                if i != key_fields.len()-1 {
+                                    ss.push('|');
+                                }
+                                i += 1;
                             }
-                            if i != key_fields.len()-1 {
-                                ss.push('|');
+                        } else {
+                            ss.push_str("NULL");
+                            //println!("no match: {}", line);
+                        }
+
+                        // println!("{:?}", ss);
+
+                        if sum_fields.len() > 0 {
+                            sum_grab.truncate(0);
+                            i=0;
+                            while i < sum_fields.len() {
+                                let index = sum_fields[i];
+                                if index+1 < record.len() {
+                                    let v = &record[index+1];
+                                    match v.parse::<f64>() {
+                                        Err(_) => {
+                                            if verbose>=1 {
+                                                eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0",v, index);
+                                            }
+                                            sum_grab.push(0f64);
+                                        },
+                                        Ok(vv) => sum_grab.push(vv),
+                                    }
+                                } else {
+                                    sum_grab.push(0f64);
+                                }
+                                i += 1;
                             }
-                            i += 1;
+                        }
+
+                        if unique_fields.len() > 0 {
+                            uni_grab.truncate(0);
+                            i=0;
+                            while i < unique_fields.len() {
+                                let index = unique_fields[i];
+                                if index+1 < record.len() {
+                                    uni_grab.push(record[index+1].to_string());
+                                } else {
+                                    uni_grab.push("NULL".to_string());
+                                }
+                                i += 1;
+                            }
+                        }
+
+                        if ss.len() > 0 {
+                            rowcount += 1;
+                            {
+                                let mut hm = clone_arc.write().unwrap();
+                                let v = hm.entry(ss.clone()).or_insert(KeySum{ count: 0, sums: Vec::new(), distinct: Vec::new() });
+                                v.count = v.count +1;
+                                // println!("sum on: {:?}", sum_grab);
+                                if v.sums.len() <= 0 {
+                                    for f in &sum_grab {
+                                        v.sums.push(*f);
+                                    }
+                                } else {
+                                    for (i,f) in sum_grab.iter().enumerate() {
+                                        v.sums[i] = v.sums[i] + f;
+                                    }
+                                }
+
+                                if uni_grab.len() > 0 {
+                                    while v.distinct.len() < uni_grab.len() {
+                                        v.distinct.push(HashSet::new());
+                                    }
+                                    for (i,u) in uni_grab.iter().enumerate() {
+                                        v.distinct[i].insert(u.to_string());
+                                    }
+                                }
+                            }
                         }
                     } else {
-                        ss.push_str("NULL");
-                        //println!("no match: {}", line);
+                        skipped += 1;
                     }
-
-                    // println!("{:?}", ss);
-
-                    if sum_fields.len() > 0 {
-                        sum_grab.truncate(0);
-                        i=0;
-                        while i < sum_fields.len() {
-                            let index = sum_fields[i];
-                            if index+1 < record.len() {
-                                let v = &record[index+1];
-                                match v.parse::<f64>() {
-                                    Err(_) => {
-                                        if verbose>=1 {
-                                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0",v, index);
-                                        }
-                                        sum_grab.push(0f64);
-                                    },
-                                    Ok(vv) => sum_grab.push(vv),
-                                }
-                            } else {
-                                sum_grab.push(0f64);
-                            }
-                            i += 1;
-                        }
-                    }
-
-                    if unique_fields.len() > 0 {
-                        uni_grab.truncate(0);
-                        i=0;
-                        while i < unique_fields.len() {
-                            let index = unique_fields[i];
-                            if index+1 < record.len() {
-                                uni_grab.push(record[index+1].to_string());
-                            } else {
-                                uni_grab.push("NULL".to_string());
-                            }
-                            i += 1;
-                        }
-                    }
-
-                    if ss.len() > 0 {
-                        rowcount += 1;
-                        {
-                            let mut hm = clone_arc.write().unwrap();
-                            let v = hm.entry(ss.clone()).or_insert(KeySum{ count: 0, sums: Vec::new(), distinct: Vec::new() });
-                            v.count = v.count +1;
-                            // println!("sum on: {:?}", sum_grab);
-                            if v.sums.len() <= 0 {
-                                for f in &sum_grab {
-                                    v.sums.push(*f);
-                                }
-                            } else {
-                                for (i,f) in sum_grab.iter().enumerate() {
-                                    v.sums[i] = v.sums[i] + f;
-                                }
-                            }
-
-                            if uni_grab.len() > 0 {
-                                while v.distinct.len() < uni_grab.len() {
-                                    v.distinct.push(HashSet::new());
-                                }
-                                for (i,u) in uni_grab.iter().enumerate() {
-                                    v.distinct[i].insert(u.to_string());
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    skipped += 1;
-                }
-    
+                } // !noop_re 
             }
             if verbose > 0 { eprintln!("threadid: {} parsed: {} lines and skipped: {}",thrno, local_count, skipped); }
         });
@@ -538,7 +555,7 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<BTreeMap<
     (rowcount, 0 /*fieldcount*/ , bytecount)
 }
 
-fn process_csv(rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<BTreeMap<String, KeySum>>>,
+fn process_csv(rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<String, KeySum>>>,
     delimiter: char, key_fields : & Vec<usize>, sum_fields : & Vec<usize>, unique_fields: & Vec<usize>, header: bool, verbose: u32) -> (usize,usize,u64) {
 
     let mut ss : String = String::with_capacity(256);
