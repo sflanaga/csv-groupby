@@ -4,6 +4,7 @@ extern crate prettytable;
 extern crate regex;
 extern crate chan;
 extern crate fnv;
+extern crate chashmap;
 
 use chan::{Sender,Receiver};
 
@@ -34,6 +35,7 @@ use std::collections::HashMap;
 use std::collections::BTreeMap;
 use std::collections::HashSet;
 use fnv::FnvHashMap;
+use chashmap::CHashMap;
 use std::slice;
 
 use prettytable::Table;
@@ -43,7 +45,8 @@ use prettytable::format;
 
 
 //type MyMap<T1,T2> = HashMap<T1,T2>;
-type MyMap<T1,T2> = FnvHashMap<T1,T2>;
+//type MyMap<T1,T2> = FnvHashMap<T1,T2>;
+type MyMap<T1,T2> = CHashMap<T1,T2>;
 
 use regex::Regex;
 
@@ -230,7 +233,8 @@ fn csv() -> Result<(),std::io::Error> {
         }
     }
 
-    let mut hm_arc : Arc<RwLock<MyMap<String, KeySum>>> = Arc::new(RwLock::new(MyMap::default()));
+    //let mut hm_arc : Arc<RwLock<MyMap<String, KeySum>>> = Arc::new(RwLock::new(MyMap::default()));
+    let mut hm_arc : Arc<MyMap<String, KeySum>> = Arc::new(MyMap::default());
 
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
@@ -286,11 +290,11 @@ fn csv() -> Result<(),std::io::Error> {
             total_bytes += metadata.len() as u64;
         }
     }
-    let cloned_hm = hm_arc.clone();
-    let hm = cloned_hm.write().unwrap();
+    //let cloned_hm = hm_arc.clone();
+    let hm = hm_arc.clone(); // cloned_hm.write().unwrap();
     if auto_align {
-        let mut table = Table::new();
-        table.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+        let celltable = std::cell::RefCell::new(Table::new());
+        celltable.borrow_mut().set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
         {
             let mut vcell = vec![];
             if key_fields.len() > 0 {
@@ -308,11 +312,13 @@ fn csv() -> Result<(),std::io::Error> {
                 vcell.push(Cell::new(&format!("u:{}",&x)));
             }
             let mut row = Row::new(vcell);
-            table.set_titles(row);
+            celltable.borrow_mut().set_titles(row);
         }
-        let mut thekeys :Vec<_> = hm.iter().map(|(k,v)| k).collect();
-        thekeys.sort_unstable();
-        for ff in thekeys.iter() {
+        //let mut thekeys :Vec<String> = hm.into_iter().map(|(k,_)| k).collect::<Vec<String>>().clone();
+        //thekeys.sort_unstable();
+        {
+        hm.retain(|ff,cc| {
+            
             let mut vcell = vec![];
             let z1: Vec<&str> = ff.split('|').collect();
             for x in &z1 {
@@ -324,8 +330,7 @@ fn csv() -> Result<(),std::io::Error> {
             }
             // z1.iter().map( |x| { println!("{}", x); vcell.push(Cell::new(x));} );
             // //vcell.push(Cell::new(&ff));
-            let cc = hm.get(*ff).unwrap();
-            
+            //let cc = hm.get(ff).unwrap();
 
             if write_record_count {
                 vcell.push(Cell::new(&format!("{}",cc.count)));
@@ -337,9 +342,12 @@ fn csv() -> Result<(),std::io::Error> {
                 vcell.push(Cell::new(&format!("{}",x.len())));
             }
             let mut row = Row::new(vcell);
-            table.add_row(row);
+            celltable.borrow_mut().add_row(row);
+            
+            true
+        });
+        celltable.borrow_mut().printstd();
         }
-        table.printstd();
     } else {
         {
             let mut vcell = vec![];
@@ -359,11 +367,12 @@ fn csv() -> Result<(),std::io::Error> {
             }
             println!("{}", vcell.join(&od));
             // let mut row = Row::new(vcell);
-            // table.set_titles(row);
+
         }
-        let mut thekeys :Vec<_> = hm.iter().map(|(k,v)| k).collect();
-        thekeys.sort_unstable();
-        for ff in thekeys.iter() {
+        //let mut thekeys :Vec<_> = hm.into_iter().map(|(k,v)| k).collect();
+        //thekeys.sort_unstable();
+         hm.retain(|ff,cc| {
+        //for ff in thekeys.iter() {
             let mut vcell = vec![];
             let z1: Vec<String> = ff.split('|').map( |x| x.to_string() ).collect();
             for x in &z1 {
@@ -373,7 +382,7 @@ fn csv() -> Result<(),std::io::Error> {
                     vcell.push(format!("{}", x));
                 }
             }
-            let cc = hm.get(*ff).unwrap();
+            let cc = hm.get(ff).unwrap();
             if write_record_count {
                 vcell.push(format!("{}",cc.count));
             }
@@ -384,8 +393,9 @@ fn csv() -> Result<(),std::io::Error> {
                 vcell.push(format!("{}",x.len()));
             }
             println!("{}", vcell.join(&od));
-        }
-    }
+            true
+        });
+    } 
 
 
     if verbose>=1 {
@@ -398,7 +408,7 @@ fn csv() -> Result<(),std::io::Error> {
 }
 
 
-fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<String, KeySum>>>,
+fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<MyMap<String, KeySum>>,
     delimiter: char, key_fields : & Vec<usize>, sum_fields : & Vec<usize>, 
     unique_fields: & Vec<usize>, header: bool, verbose: u32, re_threadno: usize, re_thread_qsize: usize, noop_re: bool) -> (usize,usize,u64) {
 
@@ -412,7 +422,8 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<Str
     let (send, recv): (Sender<Option<String>>, Receiver<Option<String>>) = chan::sync(re_thread_qsize);
     for thrno in 0..re_threadno{ 
         let clone_recv = recv.clone();
-        let clone_arc = hm_arc.clone();
+        //let clone_arc = hm_arc.clone();
+        let hm = hm_arc.clone();
         let cloned_re = re.clone();
 
         let key_fields = key_fields.clone();
@@ -506,28 +517,35 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<Str
                         if ss.len() > 0 {
                             rowcount += 1;
                             {
-                                let mut hm = clone_arc.write().unwrap();
-                                let v = hm.entry(ss.clone()).or_insert(KeySum{ count: 0, sums: Vec::new(), distinct: Vec::new() });
-                                v.count = v.count +1;
-                                // println!("sum on: {:?}", sum_grab);
-                                if v.sums.len() <= 0 {
-                                    for f in &sum_grab {
-                                        v.sums.push(*f);
-                                    }
-                                } else {
-                                    for (i,f) in sum_grab.iter().enumerate() {
-                                        v.sums[i] = v.sums[i] + f;
-                                    }
-                                }
+                                //let mut hm = clone_arc.write().unwrap();
+                               
+                                hm.upsert(ss.clone(), || 
+                                    KeySum{ count: 0, sums: Vec::new(), distinct: Vec::new() }    
+                                    , |v| {
 
-                                if uni_grab.len() > 0 {
-                                    while v.distinct.len() < uni_grab.len() {
-                                        v.distinct.push(HashSet::new());
+
+                                //let v = hm.entry(ss.clone()).or_insert(KeySum{ count: 0, sums: Vec::new(), distinct: Vec::new() });
+                                    v.count = v.count +1;
+                                    // println!("sum on: {:?}", sum_grab);
+                                    if v.sums.len() <= 0 {
+                                        for f in &sum_grab {
+                                            v.sums.push(*f);
+                                        }
+                                    } else {
+                                        for (i,f) in sum_grab.iter().enumerate() {
+                                            v.sums[i] = v.sums[i] + f;
+                                        }
                                     }
-                                    for (i,u) in uni_grab.iter().enumerate() {
-                                        v.distinct[i].insert(u.to_string());
+
+                                    if uni_grab.len() > 0 {
+                                        while v.distinct.len() < uni_grab.len() {
+                                            v.distinct.push(HashSet::new());
+                                        }
+                                        for (i,u) in uni_grab.iter().enumerate() {
+                                            v.distinct[i].insert(u.to_string());
+                                        }
                                     }
-                                }
+                                }); 
                             }
                         }
                     } else {
@@ -555,7 +573,7 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<Str
     (rowcount, 0 /*fieldcount*/ , bytecount)
 }
 
-fn process_csv(rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<String, KeySum>>>,
+fn process_csv(rdr: &mut BufRead, hm_arc : &mut Arc<MyMap<String, KeySum>>,
     delimiter: char, key_fields : & Vec<usize>, sum_fields : & Vec<usize>, unique_fields: & Vec<usize>, header: bool, verbose: u32) -> (usize,usize,u64) {
 
     let mut ss : String = String::with_capacity(256);
@@ -570,8 +588,8 @@ fn process_csv(rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<String, KeySum>
     let mut uni_grab = vec![];
 
     let mut bytecount = 0u64;
-    let clone_hm = hm_arc.clone();
-    let mut hm = clone_hm.write().unwrap();
+    //let clone_hm = hm_arc.clone();
+    let mut hm = hm_arc.clone();
     for result in recrdr.records() {
         //println!("here");
         //
@@ -643,7 +661,36 @@ fn process_csv(rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<String, KeySum>
             rowcount += 1;
             fieldcount += record.len();
             {
-                let v = hm.entry(ss.clone()).or_insert(KeySum{ count: 0, sums: sum_grab.to_vec(), distinct: Vec::new() });
+             
+                                hm.upsert(ss.clone(), || 
+                                    KeySum{ count: 0, sums: Vec::new(), distinct: Vec::new() }    
+                                    , |v| {
+
+
+                            //let v = hm.entry(ss.clone()).or_insert(KeySum{ count: 0, sums: Vec::new(), distinct: Vec::new() });
+                            v.count = v.count +1;
+                            // println!("sum on: {:?}", sum_grab);
+                            if v.sums.len() <= 0 {
+                                for f in &sum_grab {
+                                    v.sums.push(*f);
+                                }
+                            } else {
+                                for (i,f) in sum_grab.iter().enumerate() {
+                                    v.sums[i] = v.sums[i] + f;
+                                }
+                            }
+
+                            if uni_grab.len() > 0 {
+                                while v.distinct.len() < uni_grab.len() {
+                                    v.distinct.push(HashSet::new());
+                                }
+                                for (i,u) in uni_grab.iter().enumerate() {
+                                    v.distinct[i].insert(u.to_string());
+                                }
+                            }
+                        });
+                                /*
+                                    let v = hm.entry(ss.clone()).or_insert(KeySum{ count: 0, sums: sum_grab.to_vec(), distinct: Vec::new() });
                 v.count = v.count +1;
                 for (i,f) in sum_grab.iter().enumerate() {
                     v.sums[i] = v.sums[i] + f;
@@ -656,6 +703,7 @@ fn process_csv(rdr: &mut BufRead, hm_arc : &mut Arc<RwLock<MyMap<String, KeySum>
                         v.distinct[i].insert(u.to_string());
                     }
                 }
+                */
             }
         }
 
