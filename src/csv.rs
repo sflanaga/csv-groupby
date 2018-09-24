@@ -5,9 +5,14 @@ extern crate regex;
 extern crate chan;
 extern crate fnv;
 extern crate chashmap;
+extern crate crossbeam_channel; // 0.2.5;
+extern crate crossbeam;
+
 
 use chan::{Sender,Receiver};
 
+use crossbeam_channel as channel;
+use crossbeam::scope;
 
 use std::io::prelude::*;
 use std::fs::OpenOptions;
@@ -45,6 +50,7 @@ use prettytable::format;
 
 
 //type MyMap<T1,T2> = HashMap<T1,T2>;
+//type MyMap<T1,T2> = BTreeMap<T1,T2>;
 //type MyMap<T1,T2> = FnvHashMap<T1,T2>;
 type MyMap<T1,T2> = CHashMap<T1,T2>;
 
@@ -130,7 +136,7 @@ fn csv() -> Result<(),std::io::Error> {
     let mut read_stdin = false;
     let mut EMPTY = "EMPTY".to_string();
     let mut re_threadno = 3;
-    let mut re_thread_qsize = 1000;
+    let mut re_thread_qsize = 4000;
     let mut noop_re = false;
 
     let argv : Vec<String> = args().skip(1).map( |x| x).collect();
@@ -228,6 +234,8 @@ fn csv() -> Result<(),std::io::Error> {
         eprintln!("\tsum_fields: {:?}  len={}", sum_fields, sum_fields.len() );
         eprintln!("\tunique_fields: {:?}", unique_fields);
         eprintln!("\tfile list {:?}", filelist);
+        eprintln!("\tre thread queue size {}", re_thread_qsize);
+        eprintln!("\tre no of threads {}", re_threadno);
         if filelist.len() <= 0 {
             eprintln!("\tprocessing stdin");
         }
@@ -316,7 +324,8 @@ fn csv() -> Result<(),std::io::Error> {
         }
         //let mut thekeys :Vec<String> = hm.into_iter().map(|(k,_)| k).collect::<Vec<String>>().clone();
         //thekeys.sort_unstable();
-        {
+        //for ff in thekeys.iter() {
+        
         hm.retain(|ff,cc| {
             
             let mut vcell = vec![];
@@ -344,10 +353,11 @@ fn csv() -> Result<(),std::io::Error> {
             let mut row = Row::new(vcell);
             celltable.borrow_mut().add_row(row);
             
-            true
+             true
         });
+         
         celltable.borrow_mut().printstd();
-        }
+        //}
     } else {
         {
             let mut vcell = vec![];
@@ -371,7 +381,7 @@ fn csv() -> Result<(),std::io::Error> {
         }
         //let mut thekeys :Vec<_> = hm.into_iter().map(|(k,v)| k).collect();
         //thekeys.sort_unstable();
-         hm.retain(|ff,cc| {
+        hm.retain(|ff,cc| {
         //for ff in thekeys.iter() {
             let mut vcell = vec![];
             let z1: Vec<String> = ff.split('|').map( |x| x.to_string() ).collect();
@@ -419,7 +429,9 @@ fn process_re( re: &Regex, rdr: &mut BufRead, hm_arc : &mut Arc<MyMap<String, Ke
     //  setup worker threads for RE mode
     //
     let mut threadhandles = vec![];
-    let (send, recv): (Sender<Option<String>>, Receiver<Option<String>>) = chan::sync(re_thread_qsize);
+    let (send, recv): (channel::Sender<Option<String>>, channel::Receiver<Option<String>>)= channel::bounded(re_thread_qsize);
+    //let (send, recv): (channel::Sender<Option<String>>, channel::Receiver<Option<String>>)= channel::unbounded();
+    // let (send, recv): (Sender<Option<String>>, Receiver<Option<String>>) = chan::sync(re_thread_qsize);
     for thrno in 0..re_threadno{ 
         let clone_recv = recv.clone();
         //let clone_arc = hm_arc.clone();
