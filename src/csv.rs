@@ -3,7 +3,8 @@ extern crate csv;
 extern crate prettytable;
 extern crate regex;
 extern crate chan;
-extern crate crossbeam_channel; // 0.2.5;
+extern crate crossbeam_channel;
+// 0.2.5;
 extern crate crossbeam;
 
 
@@ -61,7 +62,7 @@ struct KeySum {
     distinct: Vec<HashSet<String>>,
 }
 
-fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: u32) {
+fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
     let start = Instant::now();
     for i in 0..maps.len() {
         for (k, v) in maps.get(i).unwrap() {
@@ -142,24 +143,47 @@ csv [options] -i # read from standard input
     process::exit(1);
 }
 
-fn csv() -> Result<(), std::io::Error> {
-    let mut key_fields = vec![];
-    let mut unique_fields = vec![];
-    let mut sum_fields = vec![];
-    let mut delimiter: char = ',';
-    let mut od = ",".to_string();
-    let mut auto_align: bool = true;
-    let mut verbose = 0;
-    let mut hasheader = false;
-    let mut write_record_count = true;
-    let mut re_str = String::new();
-    let mut read_stdin = false;
-    let mut empty = "EMPTY".to_string();
-    let mut re_threadno = 4;
-    let mut re_thread_qsize = 500;
-    let mut re_pace: usize = 100;
-    let mut noop_proc = false;
 
+#[derive(Debug, Clone)]
+struct CliCfg<> {
+    key_fields: Vec<usize>,
+    unique_fields: Vec<usize>,
+    sum_fields: Vec<usize>,
+    delimiter: char,
+    od: String,
+    auto_align: bool,
+    verbose: usize,
+    hasheader: bool,
+    write_record_count: bool,
+    re_str: String,
+    read_stdin: bool,
+    empty: String,
+    re_threadno: usize,
+    re_thread_qsize: usize,
+    re_pace: usize,
+    noop_proc: bool,
+}
+
+
+fn csv() -> Result<(), std::io::Error> {
+    let mut cfg: CliCfg = CliCfg {
+        key_fields: vec![],
+        unique_fields: vec![],
+        sum_fields: vec![],
+        delimiter: ',',
+        od: String::new(),
+        auto_align: true,
+        verbose: 0,
+        hasheader: false,
+        write_record_count: true,
+        re_str: String::new(),
+        read_stdin: false,
+        empty: String::new(),
+        re_threadno: 4,
+        re_thread_qsize: 500,
+        re_pace: 100,
+        noop_proc: false,
+    };
     let argv: Vec<String> = args().skip(1).map(|x| x).collect();
     let filelist = &mut vec![];
 
@@ -175,67 +199,66 @@ fn csv() -> Result<(), std::io::Error> {
                 help("command line requested help info");
             }
             "-i" => {
-                read_stdin = true;
+                cfg.read_stdin = true;
             }
             "-a" => {
-                auto_align = false;
+                cfg.auto_align = false;
             }
             "-f" => { // field list processing
                 i += 1;
-                key_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().unwrap()));
+                cfg.key_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().unwrap()));
             }
             "-s" => { // field list processing
                 i += 1;
-                sum_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().unwrap()));
+                cfg.sum_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().unwrap()));
             }
             "-u" => { // unique count AsMut
                 i += 1;
-                unique_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().unwrap()));
+                cfg.unique_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().unwrap()));
             }
             "--od" => { // unique count AsMut
                 i += 1;
-                od.clear();
-                od.push_str(&argv[i]);
+                cfg.od.push_str(&argv[i]);
             }
             "-r" => { // unique count AsMut
                 i += 1;
-                re_str.push_str(&argv[i]);
+                cfg.re_str.push_str(&argv[i]);
             }
             "-d" => { // unique count AsMut
                 i += 1;
-                delimiter = argv[i].as_bytes()[0] as char;
+                cfg.delimiter = argv[i].as_bytes()[0] as char;
             }
             "-v" => { // write out AsMut
-                verbose = 1;
+                cfg.verbose = 1;
                 eprintln!("writing stats and other info ON")
             }
             "-vv" => { // write out AsMut
-                verbose = 2;
+                cfg.verbose = 2;
                 eprintln!("writing stats and other debug info ON")
             }
             "-j" => { // thread count 
                 i += 1;
-                re_threadno = argv[i].parse::<usize>().unwrap();
+                cfg.re_threadno = argv[i].parse::<usize>().unwrap();
             }
             "-p" => { //
                 i += 1;
-                re_pace = argv[i].parse::<usize>().unwrap();
+                cfg.re_pace = argv[i].parse::<usize>().unwrap();
             }
             "-q" => { // qsize count
                 i += 1;
-                re_thread_qsize = argv[i].parse::<usize>().unwrap();
+                cfg.re_thread_qsize = argv[i].parse::<usize>().unwrap();
             }
             "-h" => { // write out AsMut
-                hasheader = true;
+                cfg.hasheader = true;
             }
             "--nc" => { // just write the keys and not the row count
-                write_record_count = false;
+                cfg.write_record_count = false;
             }
             "--noop_proc" => { // do nothing real in the re thread
-                noop_proc = true;
+                cfg.noop_proc = true;
             }
             x => {
-                if verbose >= 1 { eprintln!("adding filename {} to scan", x); }
+                if cfg.verbose >= 1 { eprintln!("adding filename {} to scan", x); }
                 filelist.push(x);
             }
         }
@@ -245,24 +268,24 @@ fn csv() -> Result<(), std::io::Error> {
     // if key_fields.len() <= 0 {
     //     help("missing key fields - you must specify -f option with something or no summaries can be made");
     // }
-    let mut regex = match Regex::new(&re_str) {
-        Err(err) => panic!("Cannot parse regular expression {}, error = {}", re_str, err),
+    let mut regex = match Regex::new(&cfg.re_str) {
+        Err(err) => panic!("Cannot parse regular expression {}, error = {}", cfg.re_str, err),
         Ok(r) => r,
     };
 
     let maxfield = 1;
 
-    if verbose >= 1 {
-        eprintln!("\tdelimiter: {}", delimiter);
-        eprintln!("\theader: {}", hasheader);
-        eprintln!("\tkey_fields: {:?}  len={}", key_fields, key_fields.len());
-        eprintln!("\tsum_fields: {:?}  len={}", sum_fields, sum_fields.len());
-        eprintln!("\tunique_fields: {:?}", unique_fields);
+    if cfg.verbose >= 1 {
+        eprintln!("\tdelimiter: {}", cfg.delimiter);
+        eprintln!("\theader: {}", cfg.hasheader);
+        eprintln!("\tkey_fields: {:?}  len={}", cfg.key_fields, cfg.key_fields.len());
+        eprintln!("\tsum_fields: {:?}  len={}", cfg.sum_fields, cfg.sum_fields.len());
+        eprintln!("\tunique_fields: {:?}", cfg.unique_fields);
         eprintln!("\tfile list {:?}", filelist);
-        eprintln!("\tre {}", re_str);
-        eprintln!("\tre thread queue size {}", re_thread_qsize);
-        eprintln!("\tre no of threads {}", re_threadno);
-        if noop_proc {
+        eprintln!("\tre {}", cfg.re_str);
+        eprintln!("\tre thread queue size {}", cfg.re_thread_qsize);
+        eprintln!("\tre no of threads {}", cfg.re_threadno);
+        if cfg.noop_proc {
             eprintln!("noop_proc - just read lines or parse csv");
         }
         if filelist.len() <= 0 {
@@ -270,15 +293,12 @@ fn csv() -> Result<(), std::io::Error> {
         }
     }
 
-    //let mut hm_arc : Arc<RwLock<MyMap<String, KeySum>>> = Arc::new(RwLock::new(MyMap::default()));
-    //let mut hm_arc : Arc<MyMap<String, KeySum>> = Arc::new(MyMap::default());
-
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
     let mut total_bytes = 0u64;
     let start_f = Instant::now();
 
-    if filelist.len() <= 0 && !read_stdin {
+    if filelist.len() <= 0 && !cfg.read_stdin {
         help("either use stdin via -i option or put files on command line");
     }
     let mut main_map = MyMap::new();
@@ -287,15 +307,14 @@ fn csv() -> Result<(), std::io::Error> {
     //
     // STDIO reading
     //
-    if filelist.len() <= 0 && read_stdin {
+    if filelist.len() <= 0 && cfg.read_stdin {
         let stdin = std::io::stdin();
         let mut handle = stdin.lock();
-        let (rowcount, fieldcount, bytecount) = if re_str.len() > 0 {
-            process_re(&regex, &mut handle, delimiter, &mut main_map, &key_fields, &sum_fields, &unique_fields, hasheader, verbose, re_threadno, re_thread_qsize, noop_proc, re_pace)
+        let (rowcount, fieldcount, bytecount) = if cfg.re_str.len() > 0 {
+            process_re( &cfg, &regex, &mut handle, &mut main_map)
         } else { //(0,0,0) }; //else {
-            process_csv(&mut handle, delimiter, &mut main_map, &key_fields, &sum_fields, &unique_fields, hasheader, verbose, noop_proc)
+            process_csv( &cfg,&mut handle, &mut main_map )
         };
-
         total_rowcount += rowcount;
         total_fieldcount += fieldcount;
         total_bytes += bytecount;
@@ -313,7 +332,7 @@ fn csv() -> Result<(), std::io::Error> {
                 }
             };
 
-            if verbose >= 1 { eprintln!("file: {}", filename); }
+            if cfg.verbose >= 1 { eprintln!("file: {}", filename); }
             let f = match OpenOptions::new()
                 .read(true)
                 .write(false)
@@ -324,10 +343,10 @@ fn csv() -> Result<(), std::io::Error> {
                     Err(e) => panic!("cannot open file \"{}\" due to this error: {}", filename, e),
                 };
             let mut handle = BufReader::with_capacity(1024 * 1024 * 4, f);
-            let (rowcount, fieldcount, bytecount) = if re_str.len() > 0 {
-                process_re(&regex, &mut handle, delimiter, &mut main_map, &key_fields, &sum_fields, &unique_fields, hasheader, verbose, re_threadno, re_thread_qsize, noop_proc, re_pace)
+            let (rowcount, fieldcount, bytecount) = if cfg.re_str.len() > 0 {
+                process_re(&cfg, &regex,&mut handle, &mut main_map)
             } else { // (0,0,0) };
-                process_csv(&mut handle, delimiter, &mut main_map, &key_fields, &sum_fields, &unique_fields, hasheader, verbose, noop_proc)
+                process_csv(&cfg, &mut handle, &mut main_map)
             };
 
             total_rowcount += rowcount;
@@ -339,23 +358,23 @@ fn csv() -> Result<(), std::io::Error> {
     // OUTPUT
     // write the data structure
     //
-    if auto_align {
+    if cfg.auto_align {
         let celltable = std::cell::RefCell::new(Table::new());
         celltable.borrow_mut().set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
         {
             let mut vcell = vec![];
-            if key_fields.len() > 0 {
-                for x in key_fields {
+            if cfg.key_fields.len() > 0 {
+                for x in cfg.key_fields {
                     vcell.push(Cell::new(&format!("k:{}", &x)));
                 }
             } else {
                 vcell.push(Cell::new("k:-"));
             }
-            if write_record_count { vcell.push(Cell::new("count")); }
-            for x in sum_fields {
+            if cfg.write_record_count { vcell.push(Cell::new("count")); }
+            for x in cfg.sum_fields {
                 vcell.push(Cell::new(&format!("s:{}", &x)));
             }
-            for x in unique_fields {
+            for x in cfg.unique_fields {
                 vcell.push(Cell::new(&format!("u:{}", &x)));
             }
             let mut row = Row::new(vcell);
@@ -367,13 +386,13 @@ fn csv() -> Result<(), std::io::Error> {
             let z1: Vec<&str> = ff.split('|').collect();
             for x in &z1 {
                 if x.len() <= 0 {
-                    vcell.push(Cell::new(&empty));
+                    vcell.push(Cell::new(&cfg.empty));
                 } else {
                     vcell.push(Cell::new(&x.to_string()));
                 }
             }
 
-            if write_record_count {
+            if cfg.write_record_count {
                 vcell.push(Cell::new(&format!("{}", cc.count)));
             }
             for x in &cc.sums {
@@ -390,21 +409,21 @@ fn csv() -> Result<(), std::io::Error> {
     } else {
         {
             let mut vcell = vec![];
-            if key_fields.len() > 0 {
-                for x in key_fields {
+            if cfg.key_fields.len() > 0 {
+                for x in cfg.key_fields {
                     vcell.push(format!("k:{}", &x));
                 }
             } else {
                 vcell.push("k:-".to_string());
             }
-            if write_record_count { vcell.push("count".to_string()); }
-            for x in sum_fields {
+            if cfg.write_record_count { vcell.push("count".to_string()); }
+            for x in cfg.sum_fields {
                 vcell.push(format!("s:{}", x));
             }
-            for x in unique_fields {
+            for x in cfg.unique_fields {
                 vcell.push(format!("u:{}", x));
             }
-            println!("{}", vcell.join(&od));
+            println!("{}", vcell.join(&cfg.od));
         }
         let mut thekeys: Vec<String> = Vec::new();
         for (k, v) in &main_map {
@@ -417,13 +436,13 @@ fn csv() -> Result<(), std::io::Error> {
             let z1: Vec<String> = ff.split('|').map(|x| x.to_string()).collect();
             for x in &z1 {
                 if x.len() <= 0 {
-                    vcell.push(format!("{}", empty));
+                    vcell.push(format!("{}", cfg.empty));
                 } else {
                     vcell.push(format!("{}", x));
                 }
             }
             let cc = main_map.get(ff).unwrap();
-            if write_record_count {
+            if cfg.write_record_count {
                 vcell.push(format!("{}", cc.count));
             }
             for x in &cc.sums {
@@ -432,11 +451,11 @@ fn csv() -> Result<(), std::io::Error> {
             for x in &cc.distinct {
                 vcell.push(format!("{}", x.len()));
             }
-            println!("{}", vcell.join(&od));
+            println!("{}", vcell.join(&cfg.od));
         };
     }
 
-    if verbose >= 1 {
+    if cfg.verbose >= 1 {
         let elapsed = start_f.elapsed();
         let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
         let rate: f64 = (total_bytes as f64 / (1024f64 * 1024f64)) as f64 / sec;
@@ -446,7 +465,7 @@ fn csv() -> Result<(), std::io::Error> {
 }
 
 #[inline]
-fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, key_fields: &Vec<usize>, sum_fields: &Vec<usize>, unique_fields: &Vec<usize>, rowcount: &mut usize, verbose: u32) -> usize
+fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> usize
     where T: std::ops::Index<usize> + std::fmt::Debug,
           <T as std::ops::Index<usize>>::Output: ToString
 {
@@ -460,24 +479,24 @@ fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &m
 
     let mut local_count = 0;
 
-    if verbose >= 3 {
-        if line.len() > 0  {
+    if cfg.verbose >= 3 {
+        if line.len() > 0 {
             eprintln!("DBG:  {:?}  from: {}", &record, line);
         } else {
             eprintln!("DBG:  {:?}", &record);
         }
     }
     let mut i = 0;
-    if key_fields.len() > 0 {
+    if cfg.key_fields.len() > 0 {
         fieldcount += rec_len;
-        while i < key_fields.len() {
-            let index = key_fields[i];
+        while i < cfg.key_fields.len() {
+            let index = cfg.key_fields[i];
             if index + 1 < rec_len {
                 ss.push_str(&record[index + 1].to_string());
             } else {
                 ss.push_str("NULL");
             }
-            if i != key_fields.len() - 1 {
+            if i != cfg.key_fields.len() - 1 {
                 ss.push('|');
             }
             i += 1;
@@ -489,16 +508,16 @@ fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &m
 
     // println!("{:?}", ss);
 
-    if sum_fields.len() > 0 {
+    if cfg.sum_fields.len() > 0 {
         sum_grab.truncate(0);
         i = 0;
-        while i < sum_fields.len() {
-            let index = sum_fields[i];
+        while i < cfg.sum_fields.len() {
+            let index = cfg.sum_fields[i];
             if index + 1 < rec_len {
                 let v = &record[index + 1];
                 match v.to_string().parse::<f64>() {
                     Err(_) => {
-                        if verbose >= 1 {
+                        if cfg.verbose >= 1 {
                             eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.to_string(), index);
                         }
                         sum_grab.push(0f64);
@@ -512,11 +531,11 @@ fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &m
         }
     }
 
-    if unique_fields.len() > 0 {
+    if cfg.unique_fields.len() > 0 {
         uni_grab.truncate(0);
         i = 0;
-        while i < unique_fields.len() {
-            let index = unique_fields[i];
+        while i < cfg.unique_fields.len() {
+            let index = cfg.unique_fields[i];
             if index + 1 < rec_len {
                 uni_grab.push(record[index + 1].to_string());
             } else {
@@ -553,8 +572,7 @@ fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &m
     fieldcount
 }
 
-fn process_re(re: &Regex, rdr: &mut BufRead, delimiter: char, map: &mut MyMap, key_fields: &Vec<usize>, sum_fields: &Vec<usize>,
-              unique_fields: &Vec<usize>, header: bool, verbose: u32, re_threadno: usize, re_thread_qsize: usize, noop_proc: bool, re_pace: usize) -> (usize, usize, u64) {
+fn process_re(cfg: &CliCfg, re: &Regex, rdr: &mut BufRead, map: &mut MyMap) -> (usize, usize, u64) {
     let mut skipped = 0u64;
     let mut bytecount = 0u64;
     let mut rowcount = 0usize;
@@ -562,18 +580,18 @@ fn process_re(re: &Regex, rdr: &mut BufRead, delimiter: char, map: &mut MyMap, k
     //  setup worker threads for RE mode
     //
     let mut threadhandles = vec![];
-    let (send, recv): (channel::Sender<Option<Vec<String>>>, channel::Receiver<Option<Vec<String>>>) = channel::bounded(re_thread_qsize);
-    for thrno in 0..re_threadno {
+    let (send, recv): (channel::Sender<Option<Vec<String>>>, channel::Receiver<Option<Vec<String>>>) = channel::bounded(cfg.re_thread_qsize);
+    for thrno in 0..cfg.re_threadno {
         let clone_recv = recv.clone();
         //let clone_arc = hm_arc.clone();
         let hm = MyMap::new();
         let cloned_re = re.clone();
 
-        let key_fields = key_fields.clone();
-        let sum_fields = sum_fields.clone();
-        let unique_fields = unique_fields.clone();
+        let key_fields = cfg.key_fields.clone();
+        let sum_fields = cfg.sum_fields.clone();
+        let unique_fields = cfg.unique_fields.clone();
         let re = re.clone();
-
+        let conf= cfg.clone();
         let h = thread::spawn(move || {
             let mut map = MyMap::new();
 
@@ -592,53 +610,52 @@ fn process_re(re: &Regex, rdr: &mut BufRead, delimiter: char, map: &mut MyMap, k
                     None => { break; }
                 }
                 for line in lines {
-                    if !noop_proc {
+                    if !conf.noop_proc {
                         if let Some(record) = re.captures(line.as_str()) {
                             local_count += 1;
 
-                            fieldcount += store_rec(&mut ss, &line, &record, record.len(), &mut map, &key_fields, &sum_fields, &unique_fields, &mut rowcount, verbose);
-
+                            fieldcount += store_rec(&mut ss, &line, &record, record.len(), &mut map, &conf, &mut rowcount);
                         } else {
                             skipped += 1;
                         }
                     }  // noop_re
                 }
             }
-            if verbose > 0 { eprintln!("threadid: {} parsed: {} lines and skipped: {}", thrno, local_count, skipped); }
+            if conf.verbose > 0 { eprintln!("threadid: {} parsed: {} lines and skipped: {}", thrno, local_count, skipped); }
             return map;
         });
         threadhandles.push(h);
     }
     let mut allthemaps = Vec::new();
     //for result in recrdr.records() {
-    let mut pacevec: Vec<String> = Vec::with_capacity(re_pace);
+    let mut pacevec: Vec<String> = Vec::with_capacity(cfg.re_pace);
     for line in rdr.lines() {
         let line = &line.unwrap();
         rowcount += 1;
         bytecount += line.len() as u64 + 1;
 
         pacevec.push(line.clone());
-        if pacevec.len() >= re_pace {
+        if pacevec.len() >= cfg.re_pace {
             send.send(Some(pacevec));
-            pacevec = Vec::with_capacity(re_pace);
+            pacevec = Vec::with_capacity(cfg.re_pace);
         }
     }
     if pacevec.len() > 0 {
         send.send(Some(pacevec));
     }
 
-    for i in 0..re_threadno { send.send(None); }
+    for i in 0..cfg.re_threadno { send.send(None); }
 
     for h in threadhandles {
         allthemaps.push(h.join().unwrap());
     }
 
-    sum_maps(map, allthemaps, verbose);
+    sum_maps(map, allthemaps, cfg.verbose);
 
     (rowcount, 0 /*fieldcount*/, bytecount)
 }
 
-
+/*
 fn __process_csv(rdr: &mut BufRead, delimiter: char, map: &mut MyMap, key_fields: &Vec<usize>, sum_fields: &Vec<usize>, unique_fields: &Vec<usize>, header: bool, verbose: u32, noop_proc: bool) -> (usize, usize, u64) {
     let mut ss: String = String::with_capacity(256);
 
@@ -662,18 +679,17 @@ fn __process_csv(rdr: &mut BufRead, delimiter: char, map: &mut MyMap, key_fields
         if verbose >= 2 {
             eprintln!("DBG: rec: {:?}", record);
         }
-        fieldcount += store_rec( &mut ss, "", &record, record.len(), map, &key_fields, &sum_fields, &unique_fields, &mut rowcount, verbose);
+        fieldcount += store_rec(&mut ss, "", &record, record.len(), map, &conf, &mut rowcount);
 
 
-        if !noop_proc {
-
-        }
+        if !noop_proc {}
     } // for record loop
 
     (rowcount, fieldcount, bytecount)
 }
+*/
 
-fn process_csv(rdr: &mut BufRead, delimiter: char, map: &mut MyMap, key_fields: &Vec<usize>, sum_fields: &Vec<usize>, unique_fields: &Vec<usize>, header: bool, verbose: u32, noop_proc: bool) -> (usize, usize, u64) {
+fn process_csv(cfg: &CliCfg, rdr: &mut BufRead, map: &mut MyMap) -> (usize, usize, u64) {
     let mut ss: String = String::with_capacity(256);
 
     let mut recrdr = rdr;
@@ -691,17 +707,17 @@ fn process_csv(rdr: &mut BufRead, delimiter: char, map: &mut MyMap, key_fields: 
         let line: String = result.unwrap();
         bytecount += line.len() as u64;
 
-     //   if !noop_proc {
-            let record: Vec<_> = line.split(delimiter).collect();
-            if verbose >= 2 {
-                eprintln!("DBG: rec: {:?}", record);
-            }
-            // let pos = record.position().expect("a record position");
-            bytecount += line.len() as u64;
+        //   if !noop_proc {
+        let record: Vec<_> = line.split(cfg.delimiter).collect();
+        if cfg.verbose >= 2 {
+            eprintln!("DBG: rec: {:?}", record);
+        }
+        // let pos = record.position().expect("a record position");
+        bytecount += line.len() as u64;
 
-            fieldcount += store_rec(&mut ss, &line, &record, record.len(), map, &key_fields, &sum_fields, &unique_fields, &mut rowcount, verbose);
+        fieldcount += store_rec(&mut ss, &line, &record, record.len(), map, &cfg, &mut rowcount);
 
-       // }
+        // }
     } // for record loop
 
     (rowcount, fieldcount, bytecount)
