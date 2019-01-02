@@ -1,4 +1,5 @@
 #![allow(unused)]
+extern crate num_cpus;
 extern crate csv;
 extern crate prettytable;
 extern crate regex;
@@ -62,37 +63,14 @@ struct KeySum {
     distinct: Vec<HashSet<String>>,
 }
 
-fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
-    let start = Instant::now();
-    for i in 0..maps.len() {
-        for (k, v) in maps.get(i).unwrap() {
-            let v_new = p_map.entry(k.to_string()).or_insert(KeySum { count: 0, sums: Vec::new(), distinct: Vec::new() });
-            v_new.count += v.count;
-
-            for j in 0..v.sums.len() {
-                if v_new.sums.len() > j {
-                    v_new.sums[j] += v_new.sums[j] + v.sums[j];
-                } else {
-                    v_new.sums.push(v.sums[j]);
-                }
-            }
-
-            while v_new.distinct.len() < v.distinct.len() {
-                v_new.distinct.push(HashSet::new());
-            }
-            for j in 0..v.distinct.len() {
-                for (ii, u) in v.distinct[j].iter().enumerate() {
-                    v_new.distinct[j].insert(u.to_string());
-                }
-            }
-        }
-    }
-    let end = Instant::now();
-    let dur = (end - start);
-    if verbose > 0 {
-        println!("re thread merge maps time: {:?}", dur);
-    }
+#[derive(Debug)]
+struct FileChunk {
+    block: Vec<u8>,
+    len: usize,
 }
+
+
+// main/cli/csv thread-spawn read->thread  { spawn block { re | csv } }
 
 
 fn main() {
@@ -116,21 +94,21 @@ csv [options] -i # read from standard input
     --help this help
     -i - read from stdin
     -h - data has header so skip first line
-    # All the follow field lists are zero based - first field is 0
+    # All the follow field lists are ZERO BASED INDEXING - first field is 0
     -f x,y...z - comma seperated field list of fields to use as a group by
     -s x,y...z - comma seperated field list of files to do a f64 sum of
     -u x,y...z - comma seperated field list of unique or distinct records
-    -a turn off table format - use csv format
+    -a turn off human friendly table format - use csv format
     -d input_delimiter - single char
     -v - verbose
     -vv - more verbose
     --nc - do not write record counts
     -r <RE> parse lines using regular expression and use sub groups as fields
-    -j <num> number of RE threads to spawn - default 4
-    -q <num> number queue-entries between line reader and re parser thread - default 500
-    -p <num> number of lines per queue entry to reduce queue touches - default 100
-    --noop_proc  do nothing but read lines or parse csv in records - no datastructure updates
-        use this to measure the flow rate of data input from file system???
+    -t <num> number of worker threads to spawn - default cpu_count upto 12
+    -q <num> number queue-entries between reader and parser threads - default 4 * thread_count
+    --noop_proc  do nothing but read blocks and pass to threads - no parsing
+        used to measure IO and thread queueing performance possible from main thread
+    --block_size_k <num>  size of the job blocks sent to threads
 "###);
     eprintln!("version: {}", env!("CARGO_PKG_VERSION"));
     eprintln!("CARGO_MANIFEST_DIR: {}", env!("CARGO_MANIFEST_DIR"));
@@ -158,14 +136,26 @@ struct CliCfg<> {
     re_str: String,
     read_stdin: bool,
     empty: String,
-    re_threadno: usize,
-    re_thread_qsize: usize,
-    re_pace: usize,
+    thread_no: usize,
+    thread_qsize: usize,
     noop_proc: bool,
+    block_size: usize,
 }
 
 
+
 fn csv() -> Result<(), std::io::Error> {
+
+    let cpu_count = num_cpus::get();
+
+    let mut default_thread = cpu_count;
+
+    if cpu_count > 12 {
+        default_thread = 12;
+    }
+
+    let mut default_q_size = 4 * default_thread;
+
     let mut cfg: CliCfg = CliCfg {
         key_fields: vec![],
         unique_fields: vec![],
@@ -179,10 +169,10 @@ fn csv() -> Result<(), std::io::Error> {
         re_str: String::new(),
         read_stdin: false,
         empty: String::new(),
-        re_threadno: 4,
-        re_thread_qsize: 500,
-        re_pace: 100,
+        thread_no: default_thread,
+        thread_qsize: default_q_size,
         noop_proc: false,
+        block_size: 256*1024,
     };
     let argv: Vec<String> = args().skip(1).map(|x| x).collect();
     let filelist = &mut vec![];
@@ -206,15 +196,15 @@ fn csv() -> Result<(), std::io::Error> {
             }
             "-f" => { // field list processing
                 i += 1;
-                cfg.key_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().unwrap()));
+                cfg.key_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().expect("cannot parse number list for -f")));
             }
             "-s" => { // field list processing
                 i += 1;
-                cfg.sum_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().unwrap()));
+                cfg.sum_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().expect("cannot parse number list for -s")));
             }
             "-u" => { // unique count AsMut
                 i += 1;
-                cfg.unique_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().unwrap()));
+                cfg.unique_fields.splice(.., (&argv[i][..]).split(",").map(|x| x.parse::<usize>().expect("cannot parse number list for -u")));
             }
             "--od" => { // unique count AsMut
                 i += 1;
@@ -236,17 +226,21 @@ fn csv() -> Result<(), std::io::Error> {
                 cfg.verbose = 2;
                 eprintln!("writing stats and other debug info ON")
             }
-            "-j" => { // thread count 
-                i += 1;
-                cfg.re_threadno = argv[i].parse::<usize>().unwrap();
+            "-vvv" => { // write out AsMut
+                cfg.verbose = 3;
+                eprintln!("writing stats and other debug info ON")
             }
-            "-p" => { //
+            "-vvvv" => { // write out AsMut
+                cfg.verbose = 4;
+                eprintln!("writing stats and other debug info ON")
+            }
+            "-t" => { // thread count
                 i += 1;
-                cfg.re_pace = argv[i].parse::<usize>().unwrap();
+                cfg.thread_no = argv[i].parse::<usize>().expect("cannot parse number of -t option - number must be 1 or more");
             }
             "-q" => { // qsize count
                 i += 1;
-                cfg.re_thread_qsize = argv[i].parse::<usize>().unwrap();
+                cfg.thread_qsize = argv[i].parse::<usize>().expect("cannot parse number of -q option - number must be 1 or more");
             }
             "-h" => { // write out AsMut
                 cfg.hasheader = true;
@@ -256,6 +250,10 @@ fn csv() -> Result<(), std::io::Error> {
             }
             "--noop_proc" => { // do nothing real in the re thread
                 cfg.noop_proc = true;
+            }
+            "--block_size_k" => { // do nothing real in the re thread
+                i += 1;
+                cfg.block_size = argv[i].parse::<usize>().unwrap() * 1024;
             }
             x => {
                 if cfg.verbose >= 1 { eprintln!("adding filename {} to scan", x); }
@@ -268,12 +266,18 @@ fn csv() -> Result<(), std::io::Error> {
     // if key_fields.len() <= 0 {
     //     help("missing key fields - you must specify -f option with something or no summaries can be made");
     // }
-    let mut regex = match Regex::new(&cfg.re_str) {
+
+    // just check RE early for problems
+    match Regex::new(&cfg.re_str) {
         Err(err) => panic!("Cannot parse regular expression {}, error = {}", cfg.re_str, err),
         Ok(r) => r,
     };
 
-    let maxfield = 1;
+    if cfg.re_str.len() > 0 {
+        cfg.key_fields.iter_mut().for_each(|x| *x += 1);
+        cfg.sum_fields.iter_mut().for_each(|x| *x += 1);
+        cfg.unique_fields.iter_mut().for_each(|x| *x += 1);
+    }
 
     if cfg.verbose >= 1 {
         eprintln!("\tdelimiter: {}", cfg.delimiter);
@@ -283,8 +287,8 @@ fn csv() -> Result<(), std::io::Error> {
         eprintln!("\tunique_fields: {:?}", cfg.unique_fields);
         eprintln!("\tfile list {:?}", filelist);
         eprintln!("\tre {}", cfg.re_str);
-        eprintln!("\tre thread queue size {}", cfg.re_thread_qsize);
-        eprintln!("\tre no of threads {}", cfg.re_threadno);
+        eprintln!("\tmax thread queue size {}", cfg.thread_qsize);
+        eprintln!("\tno of working threads {}", cfg.thread_no);
         if cfg.noop_proc {
             eprintln!("noop_proc - just read lines or parse csv");
         }
@@ -295,7 +299,7 @@ fn csv() -> Result<(), std::io::Error> {
 
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
-    let mut total_bytes = 0u64;
+    let mut total_bytes = 0usize;
     let start_f = Instant::now();
 
     if filelist.len() <= 0 && !cfg.read_stdin {
@@ -303,25 +307,34 @@ fn csv() -> Result<(), std::io::Error> {
     }
     let mut main_map = MyMap::new();
 
-    // SETUP
+    /////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+    let mut worker_handler = vec![];
+    let (send, recv): (channel::Sender<Option<FileChunk>>, channel::Receiver<Option<FileChunk>>) = channel::bounded(cfg.thread_qsize);
+
+    for thrno in 0..cfg.thread_no {
+        let cfg = cfg.clone();
+        let clone_recv = recv.clone();
+
+        let h = if cfg.re_str.len() > 0 {
+            thread::Builder::new().name(format!("worker_re{}",thrno)).spawn(move ||worker_re(&cfg, &clone_recv)).unwrap()
+        } else {
+            thread::Builder::new().name(format!("worker_csv{}",thrno)).spawn(move ||worker_csv(&cfg, &clone_recv)).unwrap()
+        };
+        worker_handler.push(h);
+    }
+
+
+    // SETUP IO
     //
-    // STDIO reading
+    // forward all IO to the block queue
     //
     if filelist.len() <= 0 && cfg.read_stdin {
         let stdin = std::io::stdin();
         let mut handle = stdin.lock();
-        let (rowcount, fieldcount, bytecount) = if cfg.re_str.len() > 0 {
-            process_re( &cfg, &regex, &mut handle, &mut main_map)
-        } else { //(0,0,0) }; //else {
-            process_csv( &cfg,&mut handle, &mut main_map )
-        };
-        total_rowcount += rowcount;
-        total_fieldcount += fieldcount;
-        total_bytes += bytecount;
+        total_bytes += io_thread_swizzle("STDIO", &cfg, &mut handle, &send)?;
     } else {
-        //
-        // FILELIST reading
-        //
         for filename in filelist.into_iter() {
             // let metadata = fs::metadata(&filename)?;
             let metadata = match fs::metadata(&filename) {
@@ -333,7 +346,7 @@ fn csv() -> Result<(), std::io::Error> {
             };
 
             if cfg.verbose >= 1 { eprintln!("file: {}", filename); }
-            let f = match OpenOptions::new()
+            let mut f = match OpenOptions::new()
                 .read(true)
                 .write(false)
                 .create(false)
@@ -342,18 +355,24 @@ fn csv() -> Result<(), std::io::Error> {
                     Ok(f) => f,
                     Err(e) => panic!("cannot open file \"{}\" due to this error: {}", filename, e),
                 };
-            let mut handle = BufReader::with_capacity(1024 * 1024 * 4, f);
-            let (rowcount, fieldcount, bytecount) = if cfg.re_str.len() > 0 {
-                process_re(&cfg, &regex,&mut handle, &mut main_map)
-            } else { // (0,0,0) };
-                process_csv(&cfg, &mut handle, &mut main_map)
-            };
-
-            total_rowcount += rowcount;
-            total_fieldcount += fieldcount;
-            total_bytes += metadata.len() as u64;
+            // let mut handle = BufReader::with_capacity(1024 * 1024 * 4, f);
+            total_bytes += io_thread_swizzle(filename, &cfg,&mut f, &send)?;
         }
-    };
+    }
+
+    // tell threads that IO is over
+    for i in 0..cfg.thread_no { send.send(None); }
+
+    // merge the data from the workers
+    let mut all_the_maps = vec![];
+    for h in worker_handler {
+        let (map, linecount, fieldcount) = h.join().unwrap();
+        total_rowcount += linecount;
+        total_fieldcount += fieldcount;
+        all_the_maps.push(map);
+    }
+    sum_maps(&mut main_map, all_the_maps, cfg.verbose);
+
 
     // OUTPUT
     // write the data structure
@@ -464,6 +483,83 @@ fn csv() -> Result<(), std::io::Error> {
     Ok(())
 }
 
+fn worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> (MyMap, usize, usize) { // return lines / fields
+    match _worker_re(cfg, recv) {
+        Ok((map, lines, fields)) => return (map,lines,fields),
+        Err(e) => {
+            let err_msg = format!("Unable to process inner file - likely compressed or not UTF8 text: {}",e);
+            panic!(err_msg);
+        }
+    }
+}
+
+fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Result<(MyMap, usize, usize), Box<std::error::Error>> { // return lines / fields
+
+    let mut map = MyMap::new();
+
+    let re = match Regex::new(&cfg.re_str) {
+        Err(err) => panic!("Cannot parse regular expression {}, error = {}", cfg.re_str, err),
+        Ok(r) => r,
+    };
+    let mut buff = String::with_capacity(256); // dyn buffer
+    let mut fieldcount = 0;
+    let mut rowcount=0;
+    let mut skipped = 0;
+    loop {
+        let fc = match recv.recv().expect("thread failed to get next job from channel") {
+            Some(fc) => fc,
+            None => { break; }
+        };
+        if !cfg.noop_proc {
+            for line in fc.block[0..fc.len].lines() {
+                let line = line?;
+                if let Some(record) = re.captures(line.as_str()) {
+                    fieldcount += store_rec(&mut buff, &line, &record, record.len(), &mut map, &cfg, &mut rowcount);
+                } else {
+                    skipped += 1;
+                }
+            }
+        }
+    }
+    Ok((map, rowcount, fieldcount))
+}
+
+fn worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>)  -> (MyMap, usize, usize) {
+    match _worker_csv(cfg, recv) {
+        Ok((map, lines, fields)) => return (map,lines,fields),
+        Err(e) => {
+            let err_msg = format!("Unable to process inner block - likely compressed or not UTF8 text: {}",e);
+            panic!(err_msg);
+        }
+    }
+}
+
+fn _worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>)  -> Result<(MyMap, usize, usize), Box<std::error::Error>>  { // return lines / fields
+
+    let mut map = MyMap::new();
+
+    let mut builder = csv::ReaderBuilder::new();
+    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.hasheader).flexible(true);
+
+    let mut buff = String::with_capacity(256); // dyn buffer
+    let mut fieldcount = 0;
+    let mut rowcount = 0;
+    loop {
+        let fc = match recv.recv().unwrap() {
+            Some(fc) => fc,
+            None => { break; }
+        };
+        if !cfg.noop_proc {
+            let mut recrdr = builder.from_reader(&fc.block[0..fc.len]);
+            for record in recrdr.records() {
+                let record = record.expect("thread failed to parse block as csv records");
+                fieldcount += store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+            }
+        }
+    }
+    Ok((map, rowcount, fieldcount))
+}
+
 #[inline]
 fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> usize
     where T: std::ops::Index<usize> + std::fmt::Debug,
@@ -491,8 +587,8 @@ fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &m
         fieldcount += rec_len;
         while i < cfg.key_fields.len() {
             let index = cfg.key_fields[i];
-            if index + 1 < rec_len {
-                ss.push_str(&record[index + 1].to_string());
+            if index < rec_len {
+                ss.push_str(&record[index].to_string());
             } else {
                 ss.push_str("NULL");
             }
@@ -513,8 +609,8 @@ fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &m
         i = 0;
         while i < cfg.sum_fields.len() {
             let index = cfg.sum_fields[i];
-            if index + 1 < rec_len {
-                let v = &record[index + 1];
+            if index < rec_len {
+                let v = &record[index];
                 match v.to_string().parse::<f64>() {
                     Err(_) => {
                         if cfg.verbose >= 1 {
@@ -536,8 +632,8 @@ fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &m
         i = 0;
         while i < cfg.unique_fields.len() {
             let index = cfg.unique_fields[i];
-            if index + 1 < rec_len {
-                uni_grab.push(record[index + 1].to_string());
+            if index < rec_len {
+                uni_grab.push(record[index].to_string());
             } else {
                 uni_grab.push("NULL".to_string());
             }
@@ -572,153 +668,89 @@ fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &m
     fieldcount
 }
 
-fn process_re(cfg: &CliCfg, re: &Regex, rdr: &mut BufRead, map: &mut MyMap) -> (usize, usize, u64) {
-    let mut skipped = 0u64;
-    let mut bytecount = 0u64;
-    let mut rowcount = 0usize;
-    //
-    //  setup worker threads for RE mode
-    //
-    let mut threadhandles = vec![];
-    let (send, recv): (channel::Sender<Option<Vec<String>>>, channel::Receiver<Option<Vec<String>>>) = channel::bounded(cfg.re_thread_qsize);
-    for thrno in 0..cfg.re_threadno {
-        let clone_recv = recv.clone();
-        //let clone_arc = hm_arc.clone();
-        let hm = MyMap::new();
-        let cloned_re = re.clone();
 
-        let key_fields = cfg.key_fields.clone();
-        let sum_fields = cfg.sum_fields.clone();
-        let unique_fields = cfg.unique_fields.clone();
-        let re = re.clone();
-        let conf= cfg.clone();
-        let h = thread::spawn(move || {
-            let mut map = MyMap::new();
+fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
+    let start = Instant::now();
+    for i in 0..maps.len() {
+        for (k, v) in maps.get(i).unwrap() {
+            let v_new = p_map.entry(k.to_string()).or_insert(KeySum { count: 0, sums: Vec::new(), distinct: Vec::new() });
+            v_new.count += v.count;
 
-            let mut ss: String = String::with_capacity(256);
-
-            let mut fieldcount = 0usize;
-
-//            let mut sum_grab = vec![];
-//            let mut uni_grab = vec![];
-
-            let mut local_count = 0;
-            loop {
-                let mut lines;
-                match clone_recv.recv().unwrap() {
-                    Some(l) => { lines = l; }
-                    None => { break; }
-                }
-                for line in lines {
-                    if !conf.noop_proc {
-                        if let Some(record) = re.captures(line.as_str()) {
-                            local_count += 1;
-
-                            fieldcount += store_rec(&mut ss, &line, &record, record.len(), &mut map, &conf, &mut rowcount);
-                        } else {
-                            skipped += 1;
-                        }
-                    }  // noop_re
+            for j in 0..v.sums.len() {
+                if v_new.sums.len() > j {
+                    v_new.sums[j] += v_new.sums[j] + v.sums[j];
+                } else {
+                    v_new.sums.push(v.sums[j]);
                 }
             }
-            if conf.verbose > 0 { eprintln!("threadid: {} parsed: {} lines and skipped: {}", thrno, local_count, skipped); }
-            return map;
-        });
-        threadhandles.push(h);
-    }
-    let mut allthemaps = Vec::new();
-    //for result in recrdr.records() {
-    let mut pacevec: Vec<String> = Vec::with_capacity(cfg.re_pace);
-    for line in rdr.lines() {
-        let line = &line.unwrap();
-        rowcount += 1;
-        bytecount += line.len() as u64 + 1;
 
-        pacevec.push(line.clone());
-        if pacevec.len() >= cfg.re_pace {
-            send.send(Some(pacevec));
-            pacevec = Vec::with_capacity(cfg.re_pace);
+            while v_new.distinct.len() < v.distinct.len() {
+                v_new.distinct.push(HashSet::new());
+            }
+            for j in 0..v.distinct.len() {
+                for (ii, u) in v.distinct[j].iter().enumerate() {
+                    v_new.distinct[j].insert(u.to_string());
+                }
+            }
         }
     }
-    if pacevec.len() > 0 {
-        send.send(Some(pacevec));
+    let end = Instant::now();
+    let dur = (end - start);
+    if verbose > 0 {
+        println!("re thread merge maps time: {:?}", dur);
     }
-
-    for i in 0..cfg.re_threadno { send.send(None); }
-
-    for h in threadhandles {
-        allthemaps.push(h.join().unwrap());
-    }
-
-    sum_maps(map, allthemaps, cfg.verbose);
-
-    (rowcount, 0 /*fieldcount*/, bytecount)
 }
 
-/*
-fn __process_csv(rdr: &mut BufRead, delimiter: char, map: &mut MyMap, key_fields: &Vec<usize>, sum_fields: &Vec<usize>, unique_fields: &Vec<usize>, header: bool, verbose: u32, noop_proc: bool) -> (usize, usize, u64) {
-    let mut ss: String = String::with_capacity(256);
+fn io_thread_swizzle(currfilename: &str, cfg: &CliCfg, handle: &mut Read, send: & channel::Sender<Option<FileChunk>>) -> Result<usize, std::io::Error>  {
+    let mut split_slop = 0;
+    let mut block_count = 0;
+    let mut bytes = 0;
 
-    let mut recrdr = csv::ReaderBuilder::new()
-        .delimiter(delimiter as u8).has_headers(header).flexible(true)
-        .from_reader(rdr);
-    //println!("{:?}", &recrdr);
-    let mut rowcount = 0usize;
-    let mut fieldcount = 0usize;
-
-//    let mut sum_grab = vec![];
-//    let mut uni_grab = vec![];
-
-    let mut bytecount = 0u64;
-    for result in recrdr.records() {
-        let record: csv::StringRecord = result.unwrap();
-
-        let pos = record.position().expect("a record position");
-        bytecount = pos.byte();
-
-        if verbose >= 2 {
-            eprintln!("DBG: rec: {:?}", record);
+    let mut holdover = vec![0u8; cfg.block_size];
+    let mut left_len = 0;
+    let mut last_left_len;
+    let mut curr_pos = 0usize;
+    loop {
+        let mut block = vec![0u8; cfg.block_size];
+        if left_len > 0 {
+            split_slop += left_len;
+            block[0..left_len].copy_from_slice(&holdover[0..left_len]);
         }
-        fieldcount += store_rec(&mut ss, "", &record, record.len(), map, &conf, &mut rowcount);
 
+        let sz = handle.read(&mut block[left_len..])?;
 
-        if !noop_proc {}
-    } // for record loop
+        let mut end = 0;
+        let mut found = false;
 
-    (rowcount, fieldcount, bytecount)
-}
-*/
-
-fn process_csv(cfg: &CliCfg, rdr: &mut BufRead, map: &mut MyMap) -> (usize, usize, u64) {
-    let mut ss: String = String::with_capacity(256);
-
-    let mut recrdr = rdr;
-    //println!("{:?}", &recrdr);
-    let mut rowcount = 0usize;
-    let mut fieldcount = 0usize;
-//    let mut sum_grab = vec![];
-//    let mut uni_grab = vec![];
-
-    let mut bytecount = 0u64;
-
-    let buff = String::with_capacity(256);
-
-    for result in recrdr.lines() {
-        let line: String = result.unwrap();
-        bytecount += line.len() as u64;
-
-        //   if !noop_proc {
-        let record: Vec<_> = line.split(cfg.delimiter).collect();
-        if cfg.verbose >= 2 {
-            eprintln!("DBG: rec: {:?}", record);
+        for i in (0..sz+left_len).rev() {
+            let c = block[i];
+            if c == b'\r' || c == b'\n' {
+                end = i;
+                found =true;
+                break;
+            }
         }
-        // let pos = record.position().expect("a record position");
-        bytecount += line.len() as u64;
 
-        fieldcount += store_rec(&mut ss, &line, &record, record.len(), map, &cfg, &mut rowcount);
+        curr_pos += sz;
+        if sz > 0 {
+            block_count += 1;
+            if !found {
+                panic!("Cannot find end line marker in current block at pos {} from file {}", curr_pos, currfilename);
+            }
+            last_left_len = left_len;
+            left_len = (sz + last_left_len) - (end + 1);
+            holdover[0..left_len].copy_from_slice(&block[end + 1..sz + last_left_len]);
 
-        // }
-    } // for record loop
+            send.send(Some(FileChunk{block: block, len: end+1}));
+            bytes += end;
 
-    (rowcount, fieldcount, bytecount)
+        } else {
+            send.send(Some(FileChunk{block: block, len: left_len}));
+            bytes += end;
+
+            break;
+        }
+    }
+
+    Ok(bytes)
 }

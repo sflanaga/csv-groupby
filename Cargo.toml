@@ -1,13 +1,16 @@
 [package]
 name = "csv"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["steve"]
+
+[profile.dev]
+panic = 'abort'
 
 [profile.release]
 lto=true
 codegen-units = 1
 opt-level = 3
-#panic = 'abort'
+panic = 'abort'
 debug = false
 debug-assertions = false
 target-cpus='native'
@@ -22,5 +25,7 @@ regex = "1"
 prettytable-rs = "^0.6"
 chan = "0.1.21"
 
-crossbeam-channel = "0.2"
-crossbeam = "0.4"
+crossbeam-channel = "0.3.6"
+crossbeam = "0.6"
+
+num_cpus = "1.0"
