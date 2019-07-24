@@ -20,12 +20,12 @@ name = "csv"
 path = "src/csv.rs"
 
 [dependencies]
-csv = "1"
-regex = "1"
-prettytable-rs = "^0.6"
-chan = "0.1.21"
+csv = "~1"
+regex = "~1"
+prettytable-rs = "~0.6"
+chan = "~0.1.21"
 
-crossbeam-channel = "0.3.6"
-crossbeam = "0.6"
+crossbeam-channel = "~0.3.6"
+crossbeam = "~0.7"
 
 num_cpus = "1.0"
