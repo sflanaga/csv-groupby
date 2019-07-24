@@ -11,7 +11,7 @@ I was always writing a "quick" perl one-liner to do this kind of thing, so I wro
 
 The delimited mode is super fast and memory efficient thanks to [rust csv library](https://github.com/BurntSushi/rust-csv) 
 and rust collections in general.
-The regular expression mode is not as fast as the perl equivalent (for now) - just easier to use.  
+The regular expression mode is not as fast per core as the perl equivalent but is now threaded to compensate.  
 
 ## How-To:
 
@@ -33,8 +33,4 @@ csv -f 0,1 -a
 ```-a``` causes delimited format to be written instead of the default table auto-aligned format.
 
 TODO:  
-
-* Expand how-tohow-to needed...
-* thread the RE parsing path
-* hyperscan?
 
