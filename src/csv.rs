@@ -100,6 +100,7 @@ csv [options] -i # read from standard input
     -u x,y...z - comma seperated field list of unique or distinct records
     -a turn off human friendly table format - use csv format
     -d input_delimiter - single char
+    --od output_delimiter when -a option used, option is a string that defaults to ,
     -v - verbose
     -vv - more verbose
     --nc - do not write record counts
@@ -161,7 +162,7 @@ fn csv() -> Result<(), std::io::Error> {
         unique_fields: vec![],
         sum_fields: vec![],
         delimiter: ',',
-        od: String::new(),
+        od: String::from(","),
         auto_align: true,
         verbose: 0,
         hasheader: false,
@@ -208,6 +209,7 @@ fn csv() -> Result<(), std::io::Error> {
             }
             "--od" => { // unique count AsMut
                 i += 1;
+                cfg.od.clear();
                 cfg.od.push_str(&argv[i]);
             }
             "-r" => { // unique count AsMut
