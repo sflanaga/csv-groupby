@@ -1,0 +1,5 @@
+reorder_imports = true
+comment_width = 180
+
+max_width = 180
+
