@@ -67,7 +67,7 @@ pub fn io_thread_swizzle(
 	verbosity: usize,
 	handle: &mut dyn Read,
 	send: &channel::Sender<Option<FileChunk>>,
-) -> Result<usize, std::io::Error> {
+) -> Result<(usize,usize), std::io::Error> {
 	if verbosity >= 2 {
 		eprintln!("Using block_size {} bytes", block_size);
 	}
@@ -162,5 +162,5 @@ pub fn io_thread_swizzle(
 		}
 	}
 
-	Ok(bytes)
+	Ok((block_count, bytes))
 }

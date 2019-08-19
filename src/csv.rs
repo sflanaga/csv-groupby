@@ -163,7 +163,7 @@ struct CliCfg {
     /// RE to match again.
     re_str: Vec<String>,
     #[structopt(long = "--fullmatch_as_field")]
-    // Using whole regex match as 0th field - adds 1 to all others
+    /// Using whole regex match as 0th field - adds 1 to all others
     fullmatch_as_field: bool,
     #[structopt(short = "d", long = "input_delimiter", default_value = ",", conflicts_with = "r")]
     /// Delimiter if in csv mode
@@ -232,14 +232,14 @@ fn csv() -> Result<(), std::io::Error> {
                 eprintln!("Override thread number to 1 since you have multiple [{}] REs listed ", cfg.re_str.len());
             }
         }
-        if cfg.re_str.len() > 0 && !cfg.fullmatch_as_field {
+        if cfg.re_str.len() > 0 {
+            if !cfg.fullmatch_as_field {
             cfg.key_fields.iter_mut().for_each(|x| *x += 1);
             cfg.sum_fields.iter_mut().for_each(|x| *x += 1);
             cfg.unique_fields.iter_mut().for_each(|x| *x += 1);
-            if cfg.verbose >= 1 {
-                eprintln!("Using full regex match as 0th field")
             }
-        }
+                eprintln!("Using full regex match as 0th field")
+        } 
         if cfg.verbose >= 2 {
             eprintln!("{:#?}", cfg);
         }
@@ -256,6 +256,7 @@ fn csv() -> Result<(), std::io::Error> {
 
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
+    let mut total_blocks = 0usize;
     let mut total_bytes = 0usize;
     let start_f = Instant::now();
 
@@ -306,7 +307,10 @@ fn csv() -> Result<(), std::io::Error> {
         }
         let stdin = std::io::stdin();
         let mut handle = stdin; // .lock();
-        total_bytes += io_thread_swizzle(&"STDIO".to_string(), block_size, cfg.verbose, &mut handle, &send)?;
+        let (blocks, bytes) = io_thread_swizzle(&"STDIO".to_string(), block_size, cfg.verbose, &mut handle, &send)?;
+        total_bytes += bytes;
+        total_blocks += blocks;
+        
     } else {
         let filelist = cfg.files.clone();
         for filename in filelist.into_iter() {
@@ -326,7 +330,9 @@ fn csv() -> Result<(), std::io::Error> {
                 Ok(f) => f,
                 Err(e) => panic!("cannot open file \"{}\" due to this error: {}", filename.display(), e),
             };
-            total_bytes += io_thread_swizzle(&filename.display(), block_size, cfg.verbose, &mut f, &send)?;
+            let (blocks, bytes) = io_thread_swizzle(&filename.display(), block_size, cfg.verbose, &mut f, &send)?;
+            total_blocks += blocks;
+            total_bytes += bytes;
         }
     }
 
@@ -465,7 +471,7 @@ fn csv() -> Result<(), std::io::Error> {
         let elapsed = start_f.elapsed();
         let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
         let rate: f64 = (total_bytes as f64 / (1024f64 * 1024f64)) as f64 / sec;
-        eprintln!("rows: {}  fields: {}  rate: {:.2}MB/s", total_rowcount, total_fieldcount, rate);
+        eprintln!("rows: {}  fields: {}  rate: {:.2}MB/s rt: {}s blocks: {}", total_rowcount, total_fieldcount, rate, elapsed.as_secs(), total_blocks);
     }
     Ok(())
 }
