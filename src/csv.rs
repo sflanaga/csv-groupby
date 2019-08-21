@@ -59,55 +59,6 @@ fn main() {
     }
 }
 
-fn help(msg: &str) {
-    if msg.len() > 0 {
-        eprintln!("error: {}", msg);
-    }
-    eprintln!(
-        r###"csv [options] file1... fileN
-csv [options]
-    --help this help
-    -i - read from stdin
-    -h - data has header so skip first line
-    # All the follow field lists are ZERO BASED INDEXING - first field is 0
-    -f x,y...z - comma seperated field list of fields to use as a group by
-    -s x,y...z - comma seperated field list of files to do a f64 sum of
-    -u x,y...z - comma seperated field list of unique or distinct records
-    -a turn off human friendly table format - use csv format
-    -d input_delimiter - single char
-    --od output_delimiter when -a option used, option is a string that defaults to ,
-    -v - verbose
-    -vv - more verbose
-    --nc - do not write record counts
-    -r <RE> parse lines using regular expression and use sub groups as fields
-    Several -r <RE> used?  Experimental.  Notes:
-    If more than one -r RE is specified, then it will switch to multiline mode.
-    This will allow only a single RE parser thread and will slow down progress
-    significantly, but will create a virtual record across each line that matches.
-    They must match in order and only the first match of each will have it's
-    sub groups captured and added to the record.  Only when the last RE is matched
-    will results be captured, and at this point it will start looking for the first
-    RE to match again.
-    -t <num> number of worker threads to spawn - default cpu_count maxes out at 12
-        This max of 12 can be overridden here but will likely requiring tweaking
-        other settings like --block_size_k size and -q size.
-    -q <num> number queue-entries between reader and parser threads - default 4 * thread_count
-    --block_size_k <num>  size of the job blocks sent to threads
-    --noop_proc  do nothing but read blocks and pass to threads - no parsing
-        used to measure IO and thread queueing performance possible from main thread
-"###
-    );
-    eprintln!("version: {}", env!("CARGO_PKG_VERSION"));
-    eprintln!("CARGO_MANIFEST_DIR: {}", env!("CARGO_MANIFEST_DIR"));
-    eprintln!("CARGO_PKG_VERSION: {}", env!("CARGO_PKG_VERSION"));
-    eprintln!("CARGO_PKG_HOMEPAGE: {}", env!("CARGO_PKG_HOMEPAGE"));
-    // if built_info::GIT_VERSION.is_some() {
-    //     println!("git rev: {}  build time: {}", built_info::GIT_VERSION.unwrap(),built_info::BUILT_TIME_UTC);
-    //
-    // }
-    process::exit(1);
-}
-
 fn usage(msg: &str) {
     eprintln!("ERROR: {}", msg);
     //    CliCfg::clap().print_help();
@@ -162,6 +113,12 @@ struct CliCfg {
     /// will results be captured, and at this point it will start looking for the first
     /// RE to match again.
     re_str: Vec<String>,
+
+    #[structopt(long = "--re_line_contains")]
+    /// Gives a hint to regex mode to presearch a line before testing regex.
+    /// This may speed up regex mode significantly if the lines you match on are a minority to the whole.
+    re_line_contains: Option<String>,
+
     #[structopt(long = "--fullmatch_as_field")]
     /// Using whole regex match as 0th field - adds 1 to all others
     fullmatch_as_field: bool,
@@ -512,6 +469,15 @@ fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Resu
         if !cfg.noop_proc {
             for line in fc.block[0..fc.len].lines() {
                 let line = line?;
+                if let Some(ref line_contains) = cfg.re_line_contains {
+                    if !line.contains(line_contains) {
+                        if cfg.verbose > 3 {
+                            println!("DBG: re_line_contains skip line: {}",line);
+                        }
+                        continue;
+                    }
+                }
+
                 if let Some(record) = re.captures(line.as_str()) {
                     fieldcount += store_rec(&mut buff, &line, &record, record.len(), &mut map, &cfg, &mut rowcount);
                 } else {
