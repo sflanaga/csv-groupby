@@ -1,5 +1,6 @@
 [package]
 name = "csv"
+
 version = "0.5.0"
 authors = ["Steve Flanagan"]
 
@@ -14,10 +15,8 @@ panic = 'abort'
 debug = false
 debug-assertions = false
 trustflags = ["-C", "target-cpu=native"]
-
 [[bin]]
 name = "csv"
-path = "src/csv.rs"
 
 [[bin]]
 name = "create_very_large_file"
@@ -38,6 +37,7 @@ crossbeam-channel = "~0.3.6"
 crossbeam = "~0.7"
 tempfile = "3.1.0"
 num_cpus = "1.0"
+clap = "~2"
 
 assert_cmd = "0.10"
 predicates = "1"

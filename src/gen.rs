@@ -59,6 +59,7 @@ pub struct FileChunk {
 	pub block: Vec<u8>,
 	pub len: usize,
 	pub index: usize,
+	pub filename: String,
 }
 
 pub fn io_thread_swizzle(
@@ -67,7 +68,7 @@ pub fn io_thread_swizzle(
 	verbosity: usize,
 	handle: &mut dyn Read,
 	send: &channel::Sender<Option<FileChunk>>,
-) -> Result<(usize,usize), std::io::Error> {
+) -> Result<(usize,usize), Box<dyn std::error::Error>> {
 	if verbosity >= 2 {
 		eprintln!("Using block_size {} bytes", block_size);
 	}
@@ -128,6 +129,7 @@ pub fn io_thread_swizzle(
 					block: block,
 					len: sz + last_left_len,
 					index: block_count,
+					filename: currfilename.to_string(),
 				}));
 				bytes += sz;
 
@@ -144,6 +146,7 @@ pub fn io_thread_swizzle(
 					block: block,
 					len: end + 1,
 					index: block_count,
+					filename: currfilename.to_string(),
 				}));
 				bytes += end + 1;
 			}
@@ -155,6 +158,7 @@ pub fn io_thread_swizzle(
 				block: block,
 				len: left_len,
 				index: block_count,
+				filename: currfilename.to_string(),
 			}));
 			bytes += left_len;
 

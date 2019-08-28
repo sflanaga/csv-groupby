@@ -8,6 +8,6 @@ fn main() {
         let j = i % 1000;
         let k = j % 10;
         let l = (j + 500) * 3;
-        write!(buffered, "{},{},{},{}\n", i, j, k, l);
+        write!(buffered, "{},{},{},{}\n", i, j, k, l).unwrap();
     }
 }
