@@ -1,4 +1,5 @@
 #![allow(unused)]
+extern crate colored;
 extern crate crossbeam_channel;
 extern crate num_cpus;
 extern crate prettytable;
@@ -29,6 +30,8 @@ use regex::Regex;
 use structopt::StructOpt;
 
 use prettytable::{cell::Cell, format, row::Row, Table};
+
+use colored::*;
 
 type MyMap = BTreeMap<String, KeySum>;
 
@@ -107,9 +110,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     // forward all IO to the block queue
     //
     if cfg.files.len() <= 0 {
-        if cfg.verbose > 0 {
-            eprintln!("<<< reading from stdin");
-        }
+        eprintln!("{}", "<<< reading from stdin".red());
         let stdin = std::io::stdin();
         let mut handle = stdin; // .lock();
         let (blocks, bytes) = io_thread_swizzle(&"STDIO".to_string(), block_size, cfg.verbose, &mut handle, &send)?;
