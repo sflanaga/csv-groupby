@@ -1,8 +1,8 @@
 #![allow(unused)]
-extern crate regex;
 extern crate crossbeam_channel;
 extern crate num_cpus;
 extern crate prettytable;
+extern crate regex;
 
 #[macro_use]
 extern crate lazy_static;
@@ -32,11 +32,11 @@ use prettytable::{cell::Cell, format, row::Row, Table};
 
 type MyMap = BTreeMap<String, KeySum>;
 
-mod gen;
 mod cli;
+mod gen;
 
+use cli::{get_cli, CliCfg};
 use gen::{greek, io_thread_swizzle, FileChunk};
-use cli::{CliCfg, get_cli};
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -61,7 +61,6 @@ fn main() {
 }
 
 fn csv() -> Result<(), Box<dyn std::error::Error>> {
-
     let cfg = get_cli()?;
 
     let mut total_rowcount = 0usize;
@@ -85,18 +84,15 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             0 => thread::Builder::new()
                 .name(format!("worker_csv{}", no_threads))
                 .spawn(move || worker_csv(&cfg, &clone_recv))
-                .unwrap()
-                ,
+                .unwrap(),
             1 => thread::Builder::new()
                 .name(format!("worker_re{}", no_threads))
                 .spawn(move || worker_re(&cfg, &clone_recv))
-                .unwrap()
-                ,
+                .unwrap(),
             _ => thread::Builder::new()
                 .name(format!("wr_mul_re{}", no_threads))
                 .spawn(move || worker_multi_re(&cfg, &clone_recv))
-                .unwrap()
-                ,
+                .unwrap(),
         };
         worker_handler.push(h);
     }
@@ -275,16 +271,16 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    if cfg.verbose >= 1 {
+    if cfg.verbose >= 1 || cfg.stats {
         let elapsed = start_f.elapsed();
         let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
         let rate: f64 = (total_bytes as f64 / (1024f64 * 1024f64)) as f64 / sec;
         eprintln!(
-            "rows: {}  fields: {}  rate: {:.2}MB/s rt: {}s blocks: {}",
+            "rows: {}  fields: {}  rate: {:.2}MB/s rt: {:.3}s blocks: {}",
             total_rowcount,
             total_fieldcount,
             rate,
-            elapsed.as_secs(),
+            elapsed.as_millis() as f64 / 1000f64,
             total_blocks
         );
     }
@@ -301,7 +297,6 @@ fn worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> (MyMa
         }
     }
 }
-
 
 fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields

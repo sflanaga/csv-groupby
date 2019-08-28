@@ -65,7 +65,7 @@ pub struct CliCfg {
     /// Using whole regex match as 0th field - adds 1 to all others
     pub fullmatch_as_field: bool,
 
-    #[structopt(short = "d", long = "input_delimiter", default_value=",")]
+    #[structopt(short = "d", long = "input_delimiter", default_value = ",")]
     /// Delimiter if in csv mode
     pub delimiter: char,
     #[structopt(short = "o", long = "output_delimiter", default_value = ",")]
@@ -115,14 +115,17 @@ pub struct CliCfg {
     /// list of input files, defaults to stdin
     pub files: Vec<PathBuf>,
 
+    #[structopt(long = "stats")]
+    /// list of input files, defaults to stdin
+    pub stats: bool,
+
     // #[structopt(long = "exit_on_badblock")]
     // /// Exit when there is an error within a block
-    // /// 
+    // ///
     // /// If a error occurrs during parsing a block, the process will write the error and block location
     // /// and continue to process.  The block is skipped otherwise.
     // /// But, this option will cause the whole process to exit when this happens
     // pub exit_on_badblock: bool,
-
     #[structopt(long = "stdin_filelist")]
     /// NOT DONE - reads files named in stdin
     pub stdin_filelist: bool,
@@ -171,4 +174,3 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
 
     Ok(cfg)
 }
-
