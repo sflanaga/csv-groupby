@@ -41,5 +41,6 @@ TODO:
 - do more work to multi-line re mode - not sure how it should really work yet
 - bstr mode for re?  does it help - who cares?
 - pcre2 usage?  - ripgrep uses it - why?
+- flat mode - no summary but just write X fields to the output as found
 
 
