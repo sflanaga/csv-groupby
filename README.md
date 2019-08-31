@@ -16,13 +16,13 @@ The regular expression mode is not as fast per core as the perl equivalent but i
 ## How-To:
 
 ```bash
-csv -d '|' -f 0,3 somefile.csv
+csv -d '|' -f 0,3 -i somefile.csv
 ```
 
 This parses somefile.csv as a pipe delimited file and does a ```select f1,f4,count(*) from X group by f1,f4;```
 
 ```bash
-cat somefile.csv | csv -i -f 0,3
+cat somefile.csv | csv -f 0,3
 ```
 This does the same thing but from standard input.
 
@@ -33,4 +33,13 @@ csv -f 0,1 -a
 ```-a``` causes delimited format to be written instead of the default table auto-aligned format.
 
 TODO:  
+
+- Read from compressed files automatically - see grep-cli
+- Use stdin as a filelist source in addition to stdin as a data source
+- Multithread io-swizzle to read more than one file at a time - good for many small files over nfs maybe
+- additional aggregate functions?:  avg, min, max, empty_count, number_count, zero_count
+- do more work to multi-line re mode - not sure how it should really work yet
+- bstr mode for re?  does it help - who cares?
+- pcre2 usage?  - ripgrep uses it - why?
+
 
