@@ -11,8 +11,15 @@ use std::io::{prelude::*, BufReader};
 use std::process::{Command, Stdio};
 use tempfile::NamedTempFile;
 
+#[macro_use]
+extern crate lazy_static;
+
 #[cfg(test)]
 mod tests {
+    lazy_static! {
+        static ref INPUT_SET_1_WITH_FINAL_NEWLINE: String = create_fake_input1(true);
+        static ref INPUT_SET_1_NO_FINAL_NEWLINE: String = create_fake_input1(false);
+    }
     use super::*;
 
     fn create_fake_input1(final_newline: bool) -> String {
@@ -26,6 +33,7 @@ mod tests {
                 input_str.push_str("\n");
             }
         }
+        // eprintln!("LEN: {}", input_str.len());
         if final_newline {
             input_str.push_str("\n");
         }
@@ -58,18 +66,19 @@ mod tests {
 9,200,201600,100
 ";
 
-    fn stdin_test_driver(args: &str, input: &str, output: &'static str) -> Result<(), Box<dyn std::error::Error>> {
+    fn stdin_test_driver(args: &str, input: &str, expected_output: &'static str) -> Result<(), Box<dyn std::error::Error>> {
+        println!("stdin test pre {}", args);
+        let mut cmd: Command = Command::cargo_bin("csv")?;
+        println!("command ran? {:#?} args: {}", cmd, args);
         let args = args.split(' ');
-        let mut cmd: Command = Command::main_binary()?;
-
+        println!("stdin test split");
         let mut stdin_def = Stdio::piped();
+        println!("pipe");
 
         if input.len() <= 0 {
             stdin_def = Stdio::null();
         }
-        cmd.args(args) // &["-f", "0", "-s", "3", "-u", "1", "-c", "-t", "4", "--block_size_B", "64"])
-            .stdin(stdin_def)
-            .stdout(Stdio::piped());
+        cmd.args(args).stdin(stdin_def).stdout(Stdio::piped()).stderr(Stdio::piped());
 
         let mut child = cmd.spawn().expect("could NOT start test instance");
         {
@@ -78,33 +87,53 @@ mod tests {
                 stdin.write_all(input.as_bytes()).expect("Failed to write to stdin");
             }
         }
-        let predicate_fn = predicate::str::similar(output);
+        println!("post spawn");
+        let predicate_fn = predicate::str::similar(expected_output);
         let output = child.wait_with_output().expect("Failed to read stdout");
-        if input.len() > 0 {
-            eprintln!("Input  : {}...", &input[0..512]);
-        }
-        eprintln!("Results: {}...", &String::from_utf8_lossy(&output.stdout)[..]);
+        // if input.len() > 0 {
+        //     eprintln!("Input  : {}...", &input[0..512]);
+        // }
+        println!("Results: {}<<END", &String::from_utf8_lossy(&output.stdout)[..]);
+        assert_eq!(expected_output, &String::from_utf8_lossy(&output.stdout));
         assert_eq!(true, predicate_fn.eval(&String::from_utf8_lossy(&output.stdout)));
-        println!("it {:?}", predicate_fn.find_case(true, &String::from_utf8_lossy(&output.stdout)).unwrap());
+        println!("it {:?}", predicate_fn.find_case(true, &String::from_utf8_lossy(&output.stdout)));
 
         Ok(())
     }
     #[test]
     fn run_easy() -> Result<(), Box<dyn std::error::Error>> {
-        stdin_test_driver("-f 0 -s 3 -u 1 -c -t 1", &create_fake_input1(true), EXPECTED_OUT1);
-        Ok(())
+        stdin_test_driver("-k 0 -s 3 -u 1 -c -n 1", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
     }
     #[test]
     fn force_threaded_small_block() -> Result<(), Box<dyn std::error::Error>> {
-        stdin_test_driver("-f 0 -s 3 -u 1 -c -t 4 --block_size_B 64", &create_fake_input1(true), EXPECTED_OUT1);
+        stdin_test_driver("-k 0 -s 3 -u 1 -c -n 4 --block_size_B 64", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
+    }
+    #[test]
+    fn force_threaded_varied_block_size_keyones() -> Result<(), Box<dyn std::error::Error>> {
+        let input = &create_fake_input1(true);
+        for i in &[32, 33, 49, 51, 52, 128, 256, 511, 512, 15000] {
+            let args = format!("-k 0 -s 3 -u 1 -c -n 4 --block_size_B {}", i);
+            stdin_test_driver(&args, &INPUT_SET_1_NO_FINAL_NEWLINE, EXPECTED_OUT1)?;
+        }
         Ok(())
     }
+
     #[test]
     fn force_threaded_varied_block_size() -> Result<(), Box<dyn std::error::Error>> {
         let input = &create_fake_input1(true);
         for i in 32..64 {
-            let args = format!("-f 0 -s 3 -u 1 -c -t 4 --block_size_B {}", i);
-            stdin_test_driver(&args, input, EXPECTED_OUT1);
+            let args = format!("-k 0 -s 3 -u 1 -c -n 4 --block_size_B {}", i);
+            stdin_test_driver(&args, &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)?;
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn force_threaded_varied_block_size_no_final_newline() -> Result<(), Box<dyn std::error::Error>> {
+        let input = &create_fake_input1(true);
+        for i in 32..64 {
+            let args = format!("-k 0 -s 3 -u 1 -c -n 4 --block_size_B {}", i);
+            stdin_test_driver(&args, &INPUT_SET_1_NO_FINAL_NEWLINE, EXPECTED_OUT1)?;
         }
         Ok(())
     }
@@ -112,27 +141,25 @@ mod tests {
     #[test]
     fn re_force_thread_small_block() -> Result<(), Box<dyn std::error::Error>> {
         stdin_test_driver(
-            "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -f 0 -s 3 -u 1 -c -t 4 --block_size_B 20",
-            &create_fake_input1(true),
+            "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 0 -s 3 -u 1 -c -n 4 --block_size_B 20",
+            &INPUT_SET_1_WITH_FINAL_NEWLINE,
             EXPECTED_OUT1,
-        );
-        Ok(())
+        )
     }
 
     #[test]
     fn re_force_thread_small_block_afile() -> Result<(), Box<dyn std::error::Error>> {
+        let input_set = &create_fake_input1(false);
         let mut file = NamedTempFile::new()?;
-        write!(file, "{}", &create_fake_input1(false));
+        write!(file, "{}", &input_set);
         stdin_test_driver(
             &format!(
-                "{} {} {}",
-                "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -f 0 -s 3 -u 1 -c -t 4 --block_size_B 20 -i ",
+                "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 0 -s 3 -u 1 -c -n 4 --block_size_B 20 -f {} {}",
                 file.path().to_string_lossy(),
                 file.path().to_string_lossy()
             ),
             "",
             EXPECTED_OUT2,
-        );
-        Ok(())
+        )
     }
 }

@@ -24,22 +24,35 @@ lazy_static! {
     static ref DEFAULT_QUEUE_SIZE: String = get_default_queue_size().to_string();
 }
 
+//conflicts_with_all =&["groupby_fields","unique_values","sum_values"]
+
 #[derive(StructOpt, Debug, Clone)]
 #[structopt(
-    name = "csv",
-    raw(setting = "structopt::clap::AppSettings::DeriveDisplayOrder"),
-    about = "Perform sql-group-bys on csv files or text files."
+    global_settings(&[structopt::clap::AppSettings::ColoredHelp, structopt::clap::AppSettings::VersionlessSubcommands, structopt::clap::AppSettings::DeriveDisplayOrder]),
+    //raw(setting = "structopt::clap::AppSettings::DeriveDisplayOrder"),
+    author, about
 )]
+///
+/// Perform a sql-like group by on csv or arbitrary text files organized into lines.  You can use multiple regex entries to attempt to capture a record across multiple lines such as xml files, but this is very experiemental.
+///
 pub struct CliCfg {
-    #[structopt(short = "f", long = "groupby_fields", raw(use_delimiter = "true"), group = "fields")]
+    #[structopt(short = "R", long = "test_re", name = "testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield"])]
+    /// Test a regular expression against strings - best surrounded by quotes
+    pub testre: Option<String>,
+
+    #[structopt(short = "L", long = "test_line", name = "testline", conflicts_with = "keyfield", requires="testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield"])]
+    /// Line(s) of text to test - best surrounded by quotes
+    pub testlines: Vec<String>,
+
+    #[structopt(short = "k", long = "key_fields", name = "keyfield", use_delimiter(true), conflicts_with = "testre")]
     /// Fields that will act as group by keys - base index 0
     pub key_fields: Vec<usize>,
 
-    #[structopt(short = "u", long = "unique_values", raw(use_delimiter = "true"), group = "fields")]
+    #[structopt(short = "u", long = "unique_values", name = "uniquefield", use_delimiter(true))]
     /// Fields to count distinct - base index 0
     pub unique_fields: Vec<usize>,
 
-    #[structopt(short = "s", long = "sum_values", raw(use_delimiter = "true"), group = "fields")]
+    #[structopt(short = "s", long = "sum_values", name = "sumfield", use_delimiter(true))]
     /// Field to sum as float64s - base index 0
     pub sum_fields: Vec<usize>,
 
@@ -56,19 +69,19 @@ pub struct CliCfg {
     /// RE to match again.
     pub re_str: Vec<String>,
 
-    #[structopt(long = "--re_line_contains", conflicts_with = "delimiter")]
+    #[structopt(short = "C", long = "re_line_contains", conflicts_with = "delimiter")]
     /// Gives a hint to regex mode to presearch a line before testing regex.
     /// This may speed up regex mode significantly if the lines you match on are a minority to the whole.
     pub re_line_contains: Option<String>,
 
-    #[structopt(long = "--fullmatch_as_field")]
+    #[structopt(long = "fullmatch_as_field")]
     /// Using whole regex match as 0th field - adds 1 to all others
     pub fullmatch_as_field: bool,
 
-    #[structopt(short = "d", long = "input_delimiter", default_value = ",")]
+    #[structopt(short = "d", long = "input_delimiter", name = "delimiter", default_value = ",")]
     /// Delimiter if in csv mode
     pub delimiter: char,
-    #[structopt(short = "o", long = "output_delimiter", default_value = ",")]
+    #[structopt(short = "o", long = "output_delimiter", name = "outputdelimiter", default_value = ",")]
     /// Output delimiter for written summaries
     pub od: String,
     #[structopt(short = "c", long = "csv_output")]
@@ -90,11 +103,11 @@ pub struct CliCfg {
     /// Empty string substitution - default is "" empty/nothing/notta
     pub empty: String,
 
-    #[structopt(short = "t", long = "worker_threads", raw(default_value = "&DEFAULT_THREAD_NO"))]
+    #[structopt(short = "n", long = "worker_threads", default_value(&DEFAULT_THREAD_NO))]
     /// Number of csv or re parsing threads - defaults to up to 12 if you have that many CPUs
     pub no_threads: u64,
 
-    #[structopt(short = "q", long = "queue_size", raw(default_value = "&DEFAULT_QUEUE_SIZE"))]
+    #[structopt(short = "q", long = "queue_size", default_value(&DEFAULT_QUEUE_SIZE))]
     /// Length of queue between IO block reading and parsing threads
     pub thread_qsize: usize,
 
@@ -111,9 +124,13 @@ pub struct CliCfg {
     /// and possible related that might occurr
     pub block_size_b: usize,
 
-    #[structopt(short = "i", name = "FILE", parse(from_os_str))]
+    #[structopt(short = "f", name = "file", parse(from_os_str), conflicts_with = "glob")]
     /// list of input files, defaults to stdin
     pub files: Vec<PathBuf>,
+
+    #[structopt(short = "g", long = "glob", name = "glob", conflicts_with = "file")]
+    /// glob search files - even recursively - see "man 7 glob"
+    pub glob: Option<String>,
 
     #[structopt(long = "stats")]
     /// list of input files, defaults to stdin
@@ -165,8 +182,8 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
         if cfg.verbose >= 2 {
             eprintln!("{:#?}", cfg);
         }
-        if cfg.key_fields.len() <= 0 && cfg.sum_fields.len() <= 0 && cfg.unique_fields.len() <= 0 {
-            Err("No work to do! - you should specify at least one or more field options")?;
+        if cfg.testre.is_none() && cfg.key_fields.len() <= 0 && cfg.sum_fields.len() <= 0 && cfg.unique_fields.len() <= 0 {
+            Err("No work to do! - you should specify at least one or more field options or a testre")?;
         }
 
         cfg

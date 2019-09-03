@@ -1,47 +1,44 @@
-#![allow(unused)]
 extern crate colored;
 extern crate crossbeam_channel;
+extern crate glob;
+extern crate grep_cli;
 extern crate num_cpus;
 extern crate prettytable;
 extern crate regex;
 
 #[macro_use]
 extern crate lazy_static;
-#[macro_use]
 extern crate structopt;
 
 use std::{
-    borrow::Borrow,
     collections::{BTreeMap, HashSet},
-    fmt::Display,
     fs,
-    fs::OpenOptions,
-    io::{prelude::*, ErrorKind},
-    ops::Add,
+    io::prelude::*,
     path::PathBuf,
-    process, slice,
-    sync::Arc,
     thread,
     time::Instant,
 };
 
 use crossbeam_channel as channel;
+use grep_cli::DecompressionReader;
 use regex::Regex;
-use structopt::StructOpt;
 
 use prettytable::{cell::Cell, format, row::Row, Table};
 
 use colored::*;
 
+use glob::glob_with;
+use glob::MatchOptions;
+
 type MyMap = BTreeMap<String, KeySum>;
 
 mod cli;
 mod gen;
+mod testre;
 
 use cli::{get_cli, CliCfg};
-use gen::{greek, io_thread_swizzle, FileChunk};
-
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+use gen::{io_thread_swizzle, FileChunk};
+use testre::testre;
 
 #[derive(Debug)]
 struct KeySum {
@@ -54,12 +51,8 @@ struct KeySum {
 
 fn main() {
     if let Err(err) = csv() {
-        match err {
-            _ => {
-                eprintln!("error: {}", &err);
-                std::process::exit(1);
-            }
-        }
+        eprintln!("error: {}", &err);
+        std::process::exit(1);
     }
 }
 
@@ -71,6 +64,11 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_blocks = 0usize;
     let mut total_bytes = 0usize;
     let start_f = Instant::now();
+
+    if cfg.testre.is_some() {
+        testre(&cfg)?;
+        return Ok(());
+    }
 
     let mut main_map = MyMap::new();
 
@@ -109,41 +107,65 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     //
     // forward all IO to the block queue
     //
-    if cfg.files.len() <= 0 {
+
+    let per_file = |filename: &PathBuf| {
+        let metadata = match fs::metadata(&filename) {
+            Ok(m) => m,
+            Err(err) => {
+                eprintln!("skipping file \"{}\", could not get stats on it, cause: {}", filename.display(), err);
+                return Ok((0, 0));
+            }
+        };
+        if !metadata.is_file() {
+            return Ok((0, 0));
+        }
+
+        if cfg.verbose >= 1 {
+            eprintln!("processing file: {}", filename.display());
+        }
+        let mut rdr = DecompressionReader::new(&filename)?;
+        // let mut f = match OpenOptions::new().read(true).write(false).create(false).open(&filename) {
+        //     Ok(f) => f,
+        //     Err(e) => panic!("cannot open file \"{}\" due to this error: {}", filename.display(), e),
+        // };
+        io_thread_swizzle(&filename.display(), block_size, cfg.verbose, &mut rdr, &send)
+    };
+
+    if cfg.files.len() <= 0 && cfg.glob.is_none() {
         eprintln!("{}", "<<< reading from stdin".red());
         let stdin = std::io::stdin();
         let mut handle = stdin; // .lock();
+
         let (blocks, bytes) = io_thread_swizzle(&"STDIO".to_string(), block_size, cfg.verbose, &mut handle, &send)?;
         total_bytes += bytes;
         total_blocks += blocks;
-    } else {
-        let filelist = cfg.files.clone();
-        for filename in filelist.into_iter() {
-            // let metadata = fs::metadata(&filename)?;
-            let metadata = match fs::metadata(&filename) {
-                Ok(m) => m,
-                Err(err) => {
-                    eprintln!("skipping file \"{}\", could not get stats on it, cause: {}", filename.display(), err);
-                    continue;
-                }
-            };
-
-            if cfg.verbose >= 1 {
-                eprintln!("file: {}", filename.display());
-            }
-            let mut f = match OpenOptions::new().read(true).write(false).create(false).open(&filename) {
-                Ok(f) => f,
-                Err(e) => panic!("cannot open file \"{}\" due to this error: {}", filename.display(), e),
-            };
-            let (blocks, bytes) = io_thread_swizzle(&filename.display(), block_size, cfg.verbose, &mut f, &send)?;
+    } else if cfg.files.len() > 0 {
+        let filelist = &cfg.files;
+        for filename in filelist {
+            let (blocks, bytes) = per_file(&filename)?;
             total_blocks += blocks;
             total_bytes += bytes;
         }
+    } else {
+        let options = MatchOptions {
+            case_sensitive: true,
+            require_literal_separator: false,
+            require_literal_leading_dot: false,
+        };
+        for entry in glob_with(&(cfg.glob.as_ref().expect("NO glob found when expected")), options).unwrap() {
+            if let Ok(path) = entry {
+                let (blocks, bytes) = per_file(&path)?;
+                total_blocks += blocks;
+                total_bytes += bytes;
+            }
+        }
     }
+    // total_blocks += blocks;
+    // total_bytes += bytes;
 
     // tell threads that IO is over
-    for i in 0..cfg.no_threads {
-        send.send(None);
+    for _i in 0..cfg.no_threads {
+        send.send(None)?;
     }
 
     // merge the data from the workers
@@ -192,7 +214,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             for x in &cfg.unique_fields {
                 vcell.push(Cell::new(&format!("u:{}", re_mod_idx(&cfg, *x))));
             }
-            let mut row = Row::new(vcell);
+            let row = Row::new(vcell);
             celltable.borrow_mut().set_titles(row);
         }
 
@@ -216,7 +238,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             for x in &cc.distinct {
                 vcell.push(Cell::new(&format!("{}", x.len())));
             }
-            let mut row = Row::new(vcell);
+            let row = Row::new(vcell);
             celltable.borrow_mut().add_row(row);
         }
 
@@ -243,7 +265,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             println!("{}", vcell.join(&cfg.od));
         }
         let mut thekeys: Vec<String> = Vec::new();
-        for (k, v) in &main_map {
+        for (k, _v) in &main_map {
             thekeys.push(k.clone());
         }
         thekeys.sort_unstable();
@@ -313,7 +335,7 @@ fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Resu
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
     let mut rowcount = 0;
-    let mut skipped = 0;
+    let mut _skipped = 0;
     loop {
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
@@ -336,7 +358,7 @@ fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Resu
                 if let Some(record) = re.captures(line.as_str()) {
                     fieldcount += store_rec(&mut buff, &line, &record, record.len(), &mut map, &cfg, &mut rowcount);
                 } else {
-                    skipped += 1;
+                    _skipped += 1;
                 }
             }
         }
@@ -420,10 +442,9 @@ fn _worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
     let mut rowcount = 0;
-    let mut skipped = 0;
+    let mut _skipped = 0;
     let mut re_curr_idx = 0;
     let mut acc_record: Vec<String> = vec![];
-    let acc_limit = 20;
 
     acc_record.push(String::new()); // push 1st blank whole match
 
@@ -471,7 +492,7 @@ fn _worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -
                         acc_idx = 1;
                     }
                 } else {
-                    skipped += 1;
+                    _skipped += 1;
                 }
             }
         }
@@ -492,8 +513,6 @@ where
 
     let mut sum_grab = vec![];
     let mut uni_grab = vec![];
-
-    let mut local_count = 0;
 
     if cfg.verbose >= 3 {
         if line.len() > 0 {
@@ -615,14 +634,14 @@ fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
                 v_new.distinct.push(HashSet::new());
             }
             for j in 0..v.distinct.len() {
-                for (ii, u) in v.distinct[j].iter().enumerate() {
+                for (_ii, u) in v.distinct[j].iter().enumerate() {
                     v_new.distinct[j].insert(u.to_string());
                 }
             }
         }
     }
     let end = Instant::now();
-    let dur = (end - start);
+    let dur = end - start;
     if verbose > 0 {
         println!("re thread merge maps time: {:?}", dur);
     }

@@ -68,12 +68,11 @@ pub fn io_thread_swizzle(
 	verbosity: usize,
 	handle: &mut dyn Read,
 	send: &channel::Sender<Option<FileChunk>>,
-) -> Result<(usize,usize), Box<dyn std::error::Error>> {
+) -> Result<(usize, usize), Box<dyn std::error::Error>> {
 	if verbosity >= 2 {
 		eprintln!("Using block_size {} bytes", block_size);
 	}
 
-	let mut split_slop = 0;
 	let mut block_count = 0;
 	let mut bytes = 0;
 
@@ -84,7 +83,6 @@ pub fn io_thread_swizzle(
 	loop {
 		let mut block = vec![0u8; block_size];
 		if left_len > 0 {
-			split_slop += left_len;
 			block[0..left_len].copy_from_slice(&holdover[0..left_len]);
 		}
 		let (expected_sz, sz) = {
@@ -130,7 +128,7 @@ pub fn io_thread_swizzle(
 					len: sz + last_left_len,
 					index: block_count,
 					filename: currfilename.to_string(),
-				}));
+				}))?;
 				bytes += sz;
 
 			// panic!("Cannot find end line marker in current block at pos {} from file {}", curr_pos, currfilename);
@@ -147,7 +145,7 @@ pub fn io_thread_swizzle(
 					len: end + 1,
 					index: block_count,
 					filename: currfilename.to_string(),
-				}));
+				}))?;
 				bytes += end + 1;
 			}
 		} else {
@@ -159,7 +157,7 @@ pub fn io_thread_swizzle(
 				len: left_len,
 				index: block_count,
 				filename: currfilename.to_string(),
-			}));
+			}))?;
 			bytes += left_len;
 
 			break;
