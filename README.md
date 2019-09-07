@@ -32,9 +32,9 @@ csv -f 0,1 -a
 
 ```-a``` causes delimited format to be written instead of the default table auto-aligned format.
 
-TODO:  
+TODO/ideas:  
 
-- Read from compressed files automatically - see grep-cli
+- Optimize allocations in store_rec - avoid that ss.clone()
 - Use stdin as a filelist source in addition to stdin as a data source
 - Multithread io-swizzle to read more than one file at a time - good for many small files over nfs maybe
 - additional aggregate functions?:  avg, min, max, empty_count, number_count, zero_count
@@ -43,4 +43,5 @@ TODO:
 - pcre2 usage?  - ripgrep uses it - why?
 - flat mode - no summary but just write X fields to the output as found
 
+- DONE: Read from compressed files automatically - see grep-cli
 
