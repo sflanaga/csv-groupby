@@ -48,6 +48,22 @@ struct KeySum {
     distinct: Vec<HashSet<String>>,
 }
 
+impl KeySum {
+    pub fn new(sum_len: usize, dist_len: usize) -> KeySum {
+        KeySum {
+            count: 0,
+            sums: vec![0f64; sum_len],
+            distinct: {
+                let mut v = Vec::with_capacity(dist_len);
+                for _ in 0..dist_len {
+                    v.push(HashSet::new());
+                }
+                v
+            },
+        }
+    }
+}
+
 // main/cli/csv thread-spawn read->thread  { spawn block { re | csv } }
 
 fn main() {
@@ -539,14 +555,23 @@ where
         ss.push_str("NULL");
         //println!("no match: {}", line);
     }
+    *rowcount += 1;
 
-    let mut sum_grab = vec![];
-    let mut uni_grab = vec![];
+    let mut brec: &mut KeySum = {
+        if let Some(v1) = map.get_mut(ss) {
+            v1
+        } else {
+            let v2 = KeySum::new(cfg.sum_fields.len(), cfg.unique_fields.len());
+            map.insert(ss.clone(), v2);
+            // TODO:  gree - just inserted but cannot use it right away instead of doing a lookup again?!!!
+            // return v2 or &v2 does not compile
+            map.get_mut(ss).unwrap()
+        }
+    };
 
-    // println!("{:?}", ss);
+    brec.count += 1;
 
     if cfg.sum_fields.len() > 0 {
-        sum_grab.truncate(0);
         i = 0;
         while i < cfg.sum_fields.len() {
             let index = cfg.sum_fields[i];
@@ -557,80 +582,27 @@ where
                         if cfg.verbose >= 1 {
                             eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
                         }
-                        sum_grab.push(0f64);
                     }
-                    Ok(vv) => sum_grab.push(vv),
+                    Ok(vv) => brec.sums[i] += vv,
                 }
-            } else {
-                sum_grab.push(0f64);
             }
             i += 1;
         }
     }
 
     if cfg.unique_fields.len() > 0 {
-        uni_grab.truncate(0);
         i = 0;
         while i < cfg.unique_fields.len() {
             let index = cfg.unique_fields[i];
             if index < rec_len {
-                uni_grab.push(record[index].as_ref());
-            } else {
-                uni_grab.push("NULL".as_ref());
+                if !brec.distinct[i].contains(record[index].as_ref()) {
+                    brec.distinct[i].insert(record[index].as_ref().to_string());
+                }
             }
             i += 1;
         }
     }
 
-    if ss.len() > 0 {
-        *rowcount += 1;
-
-        let mut v = {
-            if let Some(iv) = map.get_mut(ss) {
-                iv
-            } else {
-                map.insert(
-                    ss.clone(),
-                    KeySum {
-                        count: 0,
-                        sums: Vec::new(),
-                        distinct: Vec::new(),
-                    },
-                );
-                if let Some(v) = map.get_mut(ss) {
-                    v
-                } else {
-                    panic!("cannot get what I just inserted?!")
-                }
-            }
-        };
-
-        // let v = map.entry(ss.as_ref()).or_insert(KeySum {
-        //     count: 0,
-        //     sums: Vec::new(),
-        //     distinct: Vec::new(),
-        // });
-        v.count += 1;
-        // println!("sum on: {:?}", sum_grab);
-        if v.sums.len() <= 0 {
-            for f in &sum_grab {
-                v.sums.push(*f);
-            }
-        } else {
-            for (i, f) in sum_grab.iter().enumerate() {
-                v.sums[i] += *f;
-            }
-        }
-
-        if uni_grab.len() > 0 {
-            while v.distinct.len() < uni_grab.len() {
-                v.distinct.push(HashSet::new());
-            }
-            for (i, u) in uni_grab.iter().enumerate() {
-                v.distinct[i].insert(u.to_string());
-            }
-        }
-    }
     fieldcount
 }
 
