@@ -12,6 +12,7 @@ extern crate structopt;
 
 use std::{
     collections::{BTreeMap, HashSet},
+    fmt::Display,
     fs,
     io::prelude::*,
     path::PathBuf,
@@ -499,20 +500,18 @@ fn _worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -
     }
     Ok((map, rowcount, fieldcount))
 }
+use std::string::String;
 
 #[inline]
 fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> usize
 where
     T: std::ops::Index<usize> + std::fmt::Debug,
-    <T as std::ops::Index<usize>>::Output: ToString,
+    <T as std::ops::Index<usize>>::Output: AsRef<str>,
 {
     //let mut ss: String = String::with_capacity(256);
     ss.clear();
 
     let mut fieldcount = 0usize;
-
-    let mut sum_grab = vec![];
-    let mut uni_grab = vec![];
 
     if cfg.verbose >= 3 {
         if line.len() > 0 {
@@ -527,7 +526,7 @@ where
         while i < cfg.key_fields.len() {
             let index = cfg.key_fields[i];
             if index < rec_len {
-                ss.push_str(&record[index].to_string());
+                ss.push_str(&record[index].as_ref());
             } else {
                 ss.push_str("NULL");
             }
@@ -541,6 +540,9 @@ where
         //println!("no match: {}", line);
     }
 
+    let mut sum_grab = vec![];
+    let mut uni_grab = vec![];
+
     // println!("{:?}", ss);
 
     if cfg.sum_fields.len() > 0 {
@@ -550,10 +552,10 @@ where
             let index = cfg.sum_fields[i];
             if index < rec_len {
                 let v = &record[index];
-                match v.to_string().parse::<f64>() {
+                match v.as_ref().parse::<f64>() {
                     Err(_) => {
                         if cfg.verbose >= 1 {
-                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.to_string(), index);
+                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
                         }
                         sum_grab.push(0f64);
                     }
@@ -572,9 +574,9 @@ where
         while i < cfg.unique_fields.len() {
             let index = cfg.unique_fields[i];
             if index < rec_len {
-                uni_grab.push(record[index].to_string());
+                uni_grab.push(record[index].as_ref());
             } else {
-                uni_grab.push("NULL".to_string());
+                uni_grab.push("NULL".as_ref());
             }
             i += 1;
         }
@@ -582,11 +584,32 @@ where
 
     if ss.len() > 0 {
         *rowcount += 1;
-        let v = map.entry(ss.clone()).or_insert(KeySum {
-            count: 0,
-            sums: Vec::new(),
-            distinct: Vec::new(),
-        });
+
+        let mut v = {
+            if let Some(iv) = map.get_mut(ss) {
+                iv
+            } else {
+                map.insert(
+                    ss.clone(),
+                    KeySum {
+                        count: 0,
+                        sums: Vec::new(),
+                        distinct: Vec::new(),
+                    },
+                );
+                if let Some(v) = map.get_mut(ss) {
+                    v
+                } else {
+                    panic!("cannot get what I just inserted?!")
+                }
+            }
+        };
+
+        // let v = map.entry(ss.as_ref()).or_insert(KeySum {
+        //     count: 0,
+        //     sums: Vec::new(),
+        //     distinct: Vec::new(),
+        // });
         v.count += 1;
         // println!("sum on: {:?}", sum_grab);
         if v.sums.len() <= 0 {

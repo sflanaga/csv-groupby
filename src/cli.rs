@@ -40,7 +40,7 @@ pub struct CliCfg {
     /// Test a regular expression against strings - best surrounded by quotes
     pub testre: Option<String>,
 
-    #[structopt(short = "L", long = "test_line", name = "testline", conflicts_with = "keyfield", requires="testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield"])]
+    #[structopt(short = "L", long = "test_line", name = "testline", requires="testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield"])]
     /// Line(s) of text to test - best surrounded by quotes
     pub testlines: Vec<String>,
 
