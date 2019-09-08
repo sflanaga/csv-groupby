@@ -47,14 +47,16 @@ use testre::testre;
 struct KeySum {
     count: u64,
     sums: Vec<f64>,
+    avgs: Vec<(f64, usize)>,
     distinct: Vec<HashSet<String>>,
 }
 
 impl KeySum {
-    pub fn new(sum_len: usize, dist_len: usize) -> KeySum {
+    pub fn new(sum_len: usize, dist_len: usize, avg_len: usize) -> KeySum {
         KeySum {
             count: 0,
             sums: vec![0f64; sum_len],
+            avgs: vec![(0f64,0usize); avg_len],
             distinct: {
                 let mut v = Vec::with_capacity(dist_len);
                 for _ in 0..dist_len {
@@ -230,6 +232,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             for x in &cfg.sum_fields {
                 vcell.push(Cell::new(&format!("s:{}", re_mod_idx(&cfg, *x))));
             }
+            for x in &cfg.avg_fields {
+                vcell.push(Cell::new(&format!("a:{}", re_mod_idx(&cfg, *x))));
+            }
             for x in &cfg.unique_fields {
                 vcell.push(Cell::new(&format!("u:{}", re_mod_idx(&cfg, *x))));
             }
@@ -254,6 +259,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             for x in &cc.sums {
                 vcell.push(Cell::new(&format!("{}", x)));
             }
+            for x in &cc.avgs {
+                if x.1 <= 0 {
+                    vcell.push(Cell::new("unknown"));
+                } else {
+                    vcell.push(Cell::new(&format!("{}", (x.0/(x.1 as f64)) )));
+                }
+            }
             for x in &cc.distinct {
                 vcell.push(Cell::new(&format!("{}", x.len())));
             }
@@ -277,6 +289,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             }
             for x in &cfg.sum_fields {
                 vcell.push(format!("s:{}", re_mod_idx(&cfg, *x)));
+            }
+            for x in &cfg.avg_fields {
+                vcell.push(format!("a:{}", re_mod_idx(&cfg, *x)));
             }
             for x in &cfg.unique_fields {
                 vcell.push(format!("u:{}", re_mod_idx(&cfg, *x)));
@@ -305,6 +320,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             }
             for x in &cc.sums {
                 vcell.push(format!("{}", x));
+            }
+            for x in &cc.avgs {
+                vcell.push(format!("{}", x.0/(x.1 as f64)));
             }
             for x in &cc.distinct {
                 vcell.push(format!("{}", x.len()));
@@ -563,7 +581,7 @@ where
         if let Some(v1) = map.get_mut(ss) {
             v1
         } else {
-            let v2 = KeySum::new(cfg.sum_fields.len(), cfg.unique_fields.len());
+            let v2 = KeySum::new(cfg.sum_fields.len(), cfg.unique_fields.len(), cfg.avg_fields.len());
             map.insert(ss.clone(), v2);
             // TODO:  gree - just inserted but cannot use it right away instead of doing a lookup again?!!!
             // return v2 or &v2 does not compile
@@ -590,6 +608,25 @@ where
         }
     }
 
+    if cfg.avg_fields.len() > 0 {
+        for i in 0 .. cfg.avg_fields.len() {
+            let index = cfg.avg_fields[i];
+            if index < rec_len {
+                let v = &record[index];
+                match v.as_ref().parse::<f64>() {
+                    Err(_) => {
+                        if cfg.verbose >= 1 {
+                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
+                        }
+                    }
+                    Ok(vv) => {
+                        brec.avgs[i].0 += vv;
+                        brec.avgs[i].1 += 1;
+                    },
+                }
+            }
+        }
+    }
     if cfg.unique_fields.len() > 0 {
         for i in 0 .. cfg.unique_fields.len() {
             let index = cfg.unique_fields[i];
@@ -608,24 +645,18 @@ fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
     let start = Instant::now();
     for i in 0..maps.len() {
         for (k, v) in maps.get(i).unwrap() {
-            let v_new = p_map.entry(k.to_string()).or_insert(KeySum {
-                count: 0,
-                sums: Vec::new(),
-                distinct: Vec::new(),
-            });
+            let v_new = p_map.entry(k.to_string()).or_insert(KeySum::new(v.sums.len(), v.distinct.len(), v.avgs.len()));
             v_new.count += v.count;
 
             for j in 0..v.sums.len() {
-                if v_new.sums.len() > 0 {
-                    v_new.sums[j] += v.sums[j];
-                } else {
-                    v_new.sums.push(v.sums[j]);
-                }
+                v_new.sums[j] += v.sums[j];
             }
 
-            while v_new.distinct.len() < v.distinct.len() {
-                v_new.distinct.push(HashSet::new());
+            for j in 0..v.avgs.len() {
+                v_new.avgs[j].0 += v.avgs[j].0;
+                v_new.avgs[j].1 += v.avgs[j].1;
             }
+
             for j in 0..v.distinct.len() {
                 for (_ii, u) in v.distinct[j].iter().enumerate() {
                     v_new.distinct[j].insert(u.to_string());

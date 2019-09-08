@@ -40,30 +40,30 @@ mod tests {
         input_str
     }
 
-    static EXPECTED_OUT1: &str = "k:0,count,s:3,u:1
-0,99,99000,99
-1,100,99200,100
-2,100,99400,100
-3,100,99600,100
-4,100,99800,100
-5,100,100000,100
-6,100,100200,100
-7,100,100400,100
-8,100,100600,100
-9,100,100800,100
+    static EXPECTED_OUT1: &str = "k:0,count,s:3,a:0,u:1
+0,99,99000,0,99
+1,100,99200,1,100
+2,100,99400,2,100
+3,100,99600,3,100
+4,100,99800,4,100
+5,100,100000,5,100
+6,100,100200,6,100
+7,100,100400,7,100
+8,100,100600,8,100
+9,100,100800,9,100
 ";
 
-    static EXPECTED_OUT2: &str = "k:0,count,s:3,u:1
-0,198,198000,99
-1,200,198400,100
-2,200,198800,100
-3,200,199200,100
-4,200,199600,100
-5,200,200000,100
-6,200,200400,100
-7,200,200800,100
-8,200,201200,100
-9,200,201600,100
+    static EXPECTED_OUT2: &str = "k:0,count,s:3,a:0,u:1
+0,198,198000,0,99
+1,200,198400,1,100
+2,200,198800,2,100
+3,200,199200,3,100
+4,200,199600,4,100
+5,200,200000,5,100
+6,200,200400,6,100
+7,200,200800,7,100
+8,200,201200,8,100
+9,200,201600,9,100
 ";
 
     fn stdin_test_driver(args: &str, input: &str, expected_output: &'static str) -> Result<(), Box<dyn std::error::Error>> {
@@ -93,7 +93,8 @@ mod tests {
         // if input.len() > 0 {
         //     eprintln!("Input  : {}...", &input[0..512]);
         // }
-        println!("Results: {}<<END", &String::from_utf8_lossy(&output.stdout)[..]);
+        println!("Results:  {}<<END", &String::from_utf8_lossy(&output.stdout)[..]);
+        println!("Expected: {}<<END", expected_output);
         assert_eq!(expected_output, &String::from_utf8_lossy(&output.stdout));
         assert_eq!(true, predicate_fn.eval(&String::from_utf8_lossy(&output.stdout)));
         println!("it {:?}", predicate_fn.find_case(true, &String::from_utf8_lossy(&output.stdout)));
@@ -102,17 +103,17 @@ mod tests {
     }
     #[test]
     fn run_easy() -> Result<(), Box<dyn std::error::Error>> {
-        stdin_test_driver("-k 0 -s 3 -u 1 -c -n 1", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
+        stdin_test_driver("-k 0 -s 3 -u 1 -a 0 -c -n 1", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
     }
     #[test]
     fn force_threaded_small_block() -> Result<(), Box<dyn std::error::Error>> {
-        stdin_test_driver("-k 0 -s 3 -u 1 -c -n 4 --block_size_B 64", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
+        stdin_test_driver("-k 0 -s 3 -u 1 -a 0 -c -n 4 --block_size_B 64", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
     }
     #[test]
     fn force_threaded_varied_block_size_keyones() -> Result<(), Box<dyn std::error::Error>> {
         let input = &create_fake_input1(true);
         for i in &[32, 33, 49, 51, 52, 128, 256, 511, 512, 15000] {
-            let args = format!("-k 0 -s 3 -u 1 -c -n 4 --block_size_B {}", i);
+            let args = format!("-k 0 -s 3 -u 1 -a 0 -c -n 4 --block_size_B {}", i);
             stdin_test_driver(&args, &INPUT_SET_1_NO_FINAL_NEWLINE, EXPECTED_OUT1)?;
         }
         Ok(())
@@ -122,7 +123,7 @@ mod tests {
     fn force_threaded_varied_block_size() -> Result<(), Box<dyn std::error::Error>> {
         let input = &create_fake_input1(true);
         for i in 32..64 {
-            let args = format!("-k 0 -s 3 -u 1 -c -n 4 --block_size_B {}", i);
+            let args = format!("-k 0 -s 3 -u 1 -a 0 -c -n 4 --block_size_B {}", i);
             stdin_test_driver(&args, &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)?;
         }
         Ok(())
@@ -132,7 +133,7 @@ mod tests {
     fn force_threaded_varied_block_size_no_final_newline() -> Result<(), Box<dyn std::error::Error>> {
         let input = &create_fake_input1(true);
         for i in 32..64 {
-            let args = format!("-k 0 -s 3 -u 1 -c -n 4 --block_size_B {}", i);
+            let args = format!("-k 0 -s 3 -u 1 -a 0 -c -n 4 --block_size_B {}", i);
             stdin_test_driver(&args, &INPUT_SET_1_NO_FINAL_NEWLINE, EXPECTED_OUT1)?;
         }
         Ok(())
@@ -141,7 +142,7 @@ mod tests {
     #[test]
     fn re_force_thread_small_block() -> Result<(), Box<dyn std::error::Error>> {
         stdin_test_driver(
-            "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 0 -s 3 -u 1 -c -n 4 --block_size_B 20",
+            "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 0 -s 3 -u 1 -a 0 -c -n 4 --block_size_B 20",
             &INPUT_SET_1_WITH_FINAL_NEWLINE,
             EXPECTED_OUT1,
         )
@@ -154,7 +155,7 @@ mod tests {
         write!(file, "{}", &input_set);
         stdin_test_driver(
             &format!(
-                "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 0 -s 3 -u 1 -c -n 4 --block_size_B 20 -f {} {}",
+                "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 0 -s 3 -u 1 -a 0 -c -n 4 --block_size_B 20 -f {} {}",
                 file.path().to_string_lossy(),
                 file.path().to_string_lossy()
             ),

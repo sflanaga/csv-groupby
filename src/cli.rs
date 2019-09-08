@@ -36,11 +36,11 @@ lazy_static! {
 /// Perform a sql-like group by on csv or arbitrary text files organized into lines.  You can use multiple regex entries to attempt to capture a record across multiple lines such as xml files, but this is very experiemental.
 ///
 pub struct CliCfg {
-    #[structopt(short = "R", long = "test_re", name = "testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield"])]
+    #[structopt(short = "R", long = "test_re", name = "testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield", "avgfield"])]
     /// Test a regular expression against strings - best surrounded by quotes
     pub testre: Option<String>,
 
-    #[structopt(short = "L", long = "test_line", name = "testline", requires="testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield"])]
+    #[structopt(short = "L", long = "test_line", name = "testline", requires="testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield", "avgfield"])]
     /// Line(s) of text to test - best surrounded by quotes
     pub testlines: Vec<String>,
 
@@ -55,6 +55,10 @@ pub struct CliCfg {
     #[structopt(short = "s", long = "sum_values", name = "sumfield", use_delimiter(true))]
     /// Field to sum as float64s - base index 0
     pub sum_fields: Vec<usize>,
+
+    #[structopt(short = "a", long = "avg_values", name = "avgfield", use_delimiter(true))]
+    /// Field to average if parseable number values found - base index 0
+    pub avg_fields: Vec<usize>,
 
     #[structopt(short = "r", long = "regex", conflicts_with = "delimiter")]
     /// Regex mode regular expression
@@ -168,6 +172,7 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
             if !cfg.fullmatch_as_field {
                 cfg.key_fields.iter_mut().for_each(|x| *x += 1);
                 cfg.sum_fields.iter_mut().for_each(|x| *x += 1);
+                cfg.avg_fields.iter_mut().for_each(|x| *x += 1);
                 cfg.unique_fields.iter_mut().for_each(|x| *x += 1);
             } else {
                 eprintln!("Using full regex match as 0th field")
