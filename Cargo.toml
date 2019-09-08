@@ -1,6 +1,6 @@
 [package]
 name = "csv"
-version = "0.5.2"
+version = "0.5.3"
 authors = ["Steve Flanagan"]
 
 description="sql group by on arbitrary text or csv files"
