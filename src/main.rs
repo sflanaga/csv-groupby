@@ -5,6 +5,7 @@ extern crate grep_cli;
 extern crate num_cpus;
 extern crate prettytable;
 extern crate regex;
+extern crate cpu_time;
 
 #[macro_use]
 extern crate lazy_static;
@@ -17,9 +18,10 @@ use std::{
     io::prelude::*,
     path::PathBuf,
     thread,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
+use cpu_time::ProcessTime;
 use crossbeam_channel as channel;
 use grep_cli::DecompressionReader;
 use regex::Regex;
@@ -81,12 +83,12 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_blocks = 0usize;
     let mut total_bytes = 0usize;
     let start_f = Instant::now();
+    let startcpu = ProcessTime::now();
 
     if cfg.testre.is_some() {
         testre(&cfg)?;
         return Ok(());
     }
-
     let mut main_map = MyMap::new();
 
     /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -315,12 +317,15 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         let elapsed = start_f.elapsed();
         let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
         let rate: f64 = (total_bytes as f64 / (1024f64 * 1024f64)) as f64 / sec;
+        let elapsedcpu: Duration = startcpu.elapsed();
+        let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
         eprintln!(
-            "rows: {}  fields: {}  rate: {:.2}MB/s rt: {:.3}s blocks: {}",
+            "rows: {}  fields: {}  rate: {:.2} MB/s  time(sec): {:.3}  cpu(sec): {:.3}  blocks: {}",
             total_rowcount,
             total_fieldcount,
             rate,
-            elapsed.as_millis() as f64 / 1000f64,
+            sec,
+            seccpu,
             total_blocks
         );
     }
@@ -536,24 +541,21 @@ where
             eprintln!("DBG:  {:?}", &record);
         }
     }
-    let mut i = 0;
     if cfg.key_fields.len() > 0 {
         fieldcount += rec_len;
-        while i < cfg.key_fields.len() {
+        for i in 0 .. cfg.key_fields.len() {
             let index = cfg.key_fields[i];
             if index < rec_len {
                 ss.push_str(&record[index].as_ref());
             } else {
                 ss.push_str("NULL");
             }
-            if i != cfg.key_fields.len() - 1 {
-                ss.push('|');
-            }
-            i += 1;
+            ss.push('|');
         }
+        ss.pop();  // remove the trailing | instead of check each iteration
+        // we know we get here because of the if above.
     } else {
         ss.push_str("NULL");
-        //println!("no match: {}", line);
     }
     *rowcount += 1;
 
@@ -572,8 +574,7 @@ where
     brec.count += 1;
 
     if cfg.sum_fields.len() > 0 {
-        i = 0;
-        while i < cfg.sum_fields.len() {
+        for i in 0 .. cfg.sum_fields.len() {
             let index = cfg.sum_fields[i];
             if index < rec_len {
                 let v = &record[index];
@@ -586,20 +587,17 @@ where
                     Ok(vv) => brec.sums[i] += vv,
                 }
             }
-            i += 1;
         }
     }
 
     if cfg.unique_fields.len() > 0 {
-        i = 0;
-        while i < cfg.unique_fields.len() {
+        for i in 0 .. cfg.unique_fields.len() {
             let index = cfg.unique_fields[i];
             if index < rec_len {
                 if !brec.distinct[i].contains(record[index].as_ref()) {
                     brec.distinct[i].insert(record[index].as_ref().to_string());
                 }
             }
-            i += 1;
         }
     }
 
