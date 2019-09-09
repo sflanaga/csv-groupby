@@ -1,4 +1,5 @@
 #![allow(unused)]
+
 extern crate assert_cmd;
 extern crate predicates;
 extern crate tempfile;

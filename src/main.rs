@@ -541,7 +541,6 @@ fn _worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -
 }
 use std::string::String;
 
-#[inline]
 fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> usize
 where
     T: std::ops::Index<usize> + std::fmt::Debug,

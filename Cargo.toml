@@ -9,12 +9,12 @@ description="sql group by on arbitrary text or csv files"
 panic = 'abort'
 
 [profile.release]
-lto=true
-codegen-units = 1
-opt-level = 3
-panic = 'abort'
-debug = false
+debug = false 
 debug-assertions = false
+lto = true
+codegen-units=1
+opt-level = 3
+panic = 'abort'  # does cleanup upon panics
 trustflags = ["-C", "target-cpu=native"]
 
 [[bin]]
@@ -36,7 +36,7 @@ path = "src/quick.rs"
 
 [dependencies]
 #structopt = {version = "0.2.18", feature=["color","termsize","wrap_help"]}
-structopt = {version = "0.3.0", feature=["color","termsize","wrap_help"]}
+structopt = {version = "0.3.1", feature=["color","termsize","wrap_help"]}
 cpu-time = "0.1.0"
 csv = "~1"
 grep-cli = "0.1.3"

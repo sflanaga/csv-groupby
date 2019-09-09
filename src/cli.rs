@@ -73,7 +73,7 @@ pub struct CliCfg {
     /// RE to match again.
     pub re_str: Vec<String>,
 
-    #[structopt(short = "C", long = "re_line_contains", conflicts_with = "delimiter")]
+    #[structopt(short = "C", long = "re_line_contains")]
     /// Gives a hint to regex mode to presearch a line before testing regex.
     /// This may speed up regex mode significantly if the lines you match on are a minority to the whole.
     pub re_line_contains: Option<String>,
@@ -177,6 +177,9 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
             } else {
                 eprintln!("Using full regex match as 0th field")
             }
+        }
+        if cfg.re_line_contains.is_some() && cfg.re_str.len() <= 0 {
+            Err("re_line_contains requires -r regex option to be used")?;
         }
         for re in &cfg.re_str {
             match Regex::new(re) {
