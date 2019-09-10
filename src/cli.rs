@@ -190,7 +190,7 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
         if cfg.verbose >= 2 {
             eprintln!("{:#?}", cfg);
         }
-        if cfg.testre.is_none() && cfg.key_fields.len() <= 0 && cfg.sum_fields.len() <= 0 && cfg.unique_fields.len() <= 0 {
+        if cfg.testre.is_none() && cfg.key_fields.len() <= 0 && cfg.sum_fields.len() <= 0 && cfg.avg_fields.len() <= 0 && cfg.unique_fields.len() <= 0 {
             Err("No work to do! - you should specify at least one or more field options or a testre")?;
         }
 
