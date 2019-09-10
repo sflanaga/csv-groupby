@@ -38,6 +38,7 @@ path = "src/quick.rs"
 #structopt = {version = "0.2.18", feature=["color","termsize","wrap_help"]}
 structopt = {version = "0.3.1", feature=["color","termsize","wrap_help"]}
 cpu-time = "0.1.0"
+atty = "0.2"
 csv = "~1"
 grep-cli = "0.1.3"
 regex = "~1"

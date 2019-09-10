@@ -1,3 +1,4 @@
+extern crate atty;
 extern crate colored;
 extern crate crossbeam_channel;
 extern crate glob;
@@ -18,7 +19,9 @@ use std::{
     io::prelude::*,
     path::PathBuf,
     thread,
+    sync::{atomic::{AtomicBool,Ordering},Arc},
     time::{Duration, Instant},
+
 };
 
 use cpu_time::ProcessTime;
@@ -29,6 +32,7 @@ use regex::Regex;
 use prettytable::{cell::Cell, format, row::Row, Table};
 
 use colored::*;
+use atty::Stream;
 
 use glob::glob_with;
 use glob::MatchOptions;
@@ -40,7 +44,7 @@ mod gen;
 mod testre;
 
 use cli::{get_cli, CliCfg};
-use gen::{io_thread_swizzle, FileChunk};
+use gen::{io_thread_slicer, FileSlice, IoSlicerStatus, mem_metric};
 use testre::testre;
 
 #[derive(Debug)]
@@ -77,6 +81,39 @@ fn main() {
     }
 }
 
+fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>) {
+    let start_f = Instant::now();
+    let startcpu = ProcessTime::now();
+    loop {
+        thread::sleep(Duration::from_millis(250));
+        if thread_stopper.load(Ordering::Relaxed) { break; }
+        let total_bytes = status.bytes.load(std::sync::atomic::Ordering::Relaxed);
+        let nice_bytes = mem_metric(total_bytes);
+        let elapsed = start_f.elapsed();
+        //let ms = elapsed.as_millis();
+
+        let sec: f64 = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
+
+
+        let rate = mem_metric((total_bytes as f64 / sec) as usize);
+        let elapsedcpu: Duration = startcpu.elapsed();
+        let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
+        {
+            let curr_file=status.curr_file.lock().unwrap();
+            eprint!("{}",
+                format!("{:.2} {}  rate: {:.1} {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}                    \r",
+                nice_bytes.0, nice_bytes.1,
+                rate.0, rate.1,
+                sec,
+                seccpu,
+                curr_file,
+                ).green()
+            );
+        }
+    }
+    eprint!("                                                                             \r");
+}
+
 fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = get_cli()?;
 
@@ -96,7 +133,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     /////////////////////////////////////////////////////////////////////////////////////////////////
 
     let mut worker_handler = vec![];
-    let (send, recv): (channel::Sender<Option<FileChunk>>, channel::Receiver<Option<FileChunk>>) = channel::bounded(cfg.thread_qsize);
+    let (send, recv): (channel::Sender<Option<FileSlice>>, channel::Receiver<Option<FileSlice>>) = channel::bounded(cfg.thread_qsize);
 
     for no_threads in 0..cfg.no_threads {
         let cfg = cfg.clone();
@@ -125,10 +162,27 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         _ => cfg.block_size_b,
     };
 
+    let do_stdin = cfg.files.len() <= 0 && cfg.glob.is_none();
+
+    //
+    // setup statistics ticker thread in case we get bored waiting on things
+    //
+    let stopper = Arc::new(AtomicBool::new(false));
+    let thread_stopper = stopper.clone();
+    let mut io_status = Arc::new(IoSlicerStatus::new());
+    let do_ticker = atty::is(Stream::Stderr) && !do_stdin && !(cfg.verbose >= 3);
+    let ticker = {
+        if do_ticker {
+            let mut io_status_cloned = io_status.clone();
+            Some(thread::spawn(move || { stat_ticker(thread_stopper, &mut io_status_cloned) }))
+        } else {
+            None
+        }
+    };
+
     //
     // forward all IO to the block queue
     //
-
     let per_file = |filename: &PathBuf| {
         let metadata = match fs::metadata(&filename) {
             Ok(m) => m,
@@ -149,15 +203,16 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         //     Ok(f) => f,
         //     Err(e) => panic!("cannot open file \"{}\" due to this error: {}", filename.display(), e),
         // };
-        io_thread_swizzle(&filename.display(), block_size, cfg.verbose, &mut rdr, &send)
+        io_thread_slicer(&filename.display(), block_size, cfg.verbose, &mut rdr, &mut io_status.clone(), &send)
     };
 
-    if cfg.files.len() <= 0 && cfg.glob.is_none() {
+
+    if do_stdin {
         eprintln!("{}", "<<< reading from stdin".red());
         let stdin = std::io::stdin();
         let mut handle = stdin; // .lock();
 
-        let (blocks, bytes) = io_thread_swizzle(&"STDIO".to_string(), block_size, cfg.verbose, &mut handle, &send)?;
+        let (blocks, bytes) = io_thread_slicer(&"STDIO".to_string(), block_size, cfg.verbose, &mut handle, &mut io_status, &send)?;
         total_bytes += bytes;
         total_blocks += blocks;
     } else if cfg.files.len() > 0 {
@@ -181,6 +236,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
+
     // total_blocks += blocks;
     // total_bytes += bytes;
 
@@ -199,6 +255,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     }
     sum_maps(&mut main_map, all_the_maps, cfg.verbose);
 
+    stopper.swap(true, Ordering::Relaxed);
+
     // OUTPUT
     // write the data structure
     //
@@ -214,6 +272,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             v
         }
     }
+    if do_ticker { eprintln!(); } // write extra line at the end of stderr in case the ticker munges things
     if !cfg.csv_output {
         let celltable = std::cell::RefCell::new(Table::new());
         celltable.borrow_mut().set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
@@ -350,7 +409,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> (MyMap, usize, usize) {
+fn worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
     // return lines / fields
     match _worker_re(cfg, recv) {
         Ok((map, lines, fields)) => return (map, lines, fields),
@@ -361,7 +420,7 @@ fn worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> (MyMa
     }
 }
 
-fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
+fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = MyMap::new();
@@ -406,7 +465,7 @@ fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Resu
     Ok((map, rowcount, fieldcount))
 }
 
-fn worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> (MyMap, usize, usize) {
+fn worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
     match _worker_csv(cfg, recv) {
         Ok((map, lines, fields)) => return (map, lines, fields),
         Err(e) => {
@@ -416,7 +475,7 @@ fn worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> (MyM
     }
 }
 
-fn _worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
+fn _worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = MyMap::new();
@@ -450,7 +509,7 @@ fn _worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Res
     Ok((map, rowcount, fieldcount))
 }
 
-fn worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> (MyMap, usize, usize) {
+fn worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
     // return lines / fields
     match _worker_multi_re(cfg, recv) {
         Ok((map, lines, fields)) => return (map, lines, fields),
@@ -469,7 +528,7 @@ fn grow_str_vec_or_add(idx: usize, v: &mut Vec<String>, s: &str) {
     }
 }
 
-fn _worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
+fn _worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = MyMap::new();
@@ -539,7 +598,6 @@ fn _worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileChunk>>) -
     }
     Ok((map, rowcount, fieldcount))
 }
-use std::string::String;
 
 fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> usize
 where
@@ -617,7 +675,7 @@ where
                         if cfg.verbose >= 1 {
                             eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
                         }
-                    }
+                    },
                     Ok(vv) => {
                         brec.avgs[i].0 += vv;
                         brec.avgs[i].1 += 1;

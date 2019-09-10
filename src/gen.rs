@@ -1,6 +1,24 @@
 use std::fmt::Display;
 use std::io::Read;
 
+pub fn mem_metric<'a>(v: usize) -> (f64,&'a str) {
+	const METRIC : [(usize,&str);7] = [
+		(1usize, ""),
+		(1usize<<10, "KB"),
+		(1usize<<20, "MB"),
+		(1usize<<30, "GB"),
+		(1usize<<40, "TB"),
+		(1usize<<50, "PB"),
+		(1usize<<60, "EB")];
+
+	for i in 1..METRIC.len() {
+		if v < METRIC[i].0 {
+			return (v as f64 / METRIC[i-1].0 as f64, METRIC[i-1].1);
+		}
+	}
+	(v as f64, "")
+}
+
 pub fn greek(v: f64) -> String {
 	const GR_BACKOFF: f64 = 24.0;
 	const GROWTH: f64 = 1024.0;
@@ -53,24 +71,50 @@ pub fn user_pause() {
 }
 
 use crossbeam_channel as channel;
+use std::sync::{Arc,Mutex,atomic::{AtomicUsize, Ordering}};
 
 #[derive(Debug)]
-pub struct FileChunk {
+pub struct IoSlicerStatus {
+	pub bytes: AtomicUsize,
+	pub files: AtomicUsize,
+	pub curr_file: Mutex<String>
+}
+
+impl IoSlicerStatus {
+	pub fn new() -> IoSlicerStatus {
+		IoSlicerStatus {
+			bytes: AtomicUsize::new(0),
+			files: AtomicUsize::new(0),
+			curr_file: Mutex::new(String::new()),
+		}
+	}
+}
+
+#[derive(Debug)]
+pub struct FileSlice {
 	pub block: Vec<u8>,
 	pub len: usize,
 	pub index: usize,
 	pub filename: String,
 }
 
-pub fn io_thread_swizzle(
+pub fn io_thread_slicer (
 	currfilename: &dyn Display,
 	block_size: usize,
 	verbosity: usize,
 	handle: &mut dyn Read,
-	send: &channel::Sender<Option<FileChunk>>,
+	status: &mut Arc<IoSlicerStatus>,
+	send: &channel::Sender<Option<FileSlice>>,
 ) -> Result<(usize, usize), Box<dyn std::error::Error>> {
+
 	if verbosity >= 2 {
 		eprintln!("Using block_size {} bytes", block_size);
+	}
+
+	{
+		let mut curr_file = status.curr_file.lock().unwrap();
+		curr_file.clear();
+		curr_file.push_str(format!("{}", currfilename).as_str());
 	}
 
 	let mut block_count = 0;
@@ -112,6 +156,7 @@ pub fn io_thread_swizzle(
 		}
 		// println!("read block: {:?}\nhold block: {:?}", block, holdover);
 
+
 		curr_pos += sz;
 		if sz > 0 {
 			block_count += 1;
@@ -123,12 +168,13 @@ pub fn io_thread_swizzle(
 				if !apparent_eof {
 					eprintln!("WARNING: sending no EOL found in block around file:pos {}:{} ", currfilename, curr_pos);
 				}
-				send.send(Some(FileChunk {
+				send.send(Some(FileSlice {
 					block: block,
 					len: sz + last_left_len,
 					index: block_count,
 					filename: currfilename.to_string(),
 				}))?;
+				status.bytes.fetch_add(sz, Ordering::Relaxed);
 				bytes += sz;
 
 			// panic!("Cannot find end line marker in current block at pos {} from file {}", curr_pos, currfilename);
@@ -140,29 +186,30 @@ pub fn io_thread_swizzle(
 				if verbosity > 2 {
 					eprintln!("sending found EOL at {} ", end + 1);
 				}
-				send.send(Some(FileChunk {
+				send.send(Some(FileSlice {
 					block: block,
 					len: end + 1,
 					index: block_count,
 					filename: currfilename.to_string(),
 				}))?;
+				status.bytes.fetch_add(end + 1, Ordering::Relaxed);
 				bytes += end + 1;
 			}
 		} else {
 			if verbosity > 2 {
 				eprintln!("sending tail len {} on file: {} ", left_len, currfilename);
 			}
-			send.send(Some(FileChunk {
+			send.send(Some(FileSlice {
 				block: block,
 				len: left_len,
 				index: block_count,
 				filename: currfilename.to_string(),
 			}))?;
 			bytes += left_len;
+			status.bytes.fetch_add(left_len, Ordering::Relaxed);
 
 			break;
 		}
 	}
-
 	Ok((block_count, bytes))
 }
