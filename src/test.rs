@@ -102,14 +102,17 @@ mod tests {
 
         Ok(())
     }
+
     #[test]
     fn run_easy() -> Result<(), Box<dyn std::error::Error>> {
         stdin_test_driver("-k 0 -s 3 -u 1 -a 0 -c -n 1", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
     }
+
     #[test]
     fn force_threaded_small_block() -> Result<(), Box<dyn std::error::Error>> {
         stdin_test_driver("-k 0 -s 3 -u 1 -a 0 -c -n 4 --block_size_B 64", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
     }
+
     #[test]
     fn force_threaded_varied_block_size_keyones() -> Result<(), Box<dyn std::error::Error>> {
         let input = &create_fake_input1(true);

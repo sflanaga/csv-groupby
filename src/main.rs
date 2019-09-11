@@ -44,7 +44,7 @@ mod gen;
 mod testre;
 
 use cli::{get_cli, CliCfg};
-use gen::{io_thread_slicer, FileSlice, IoSlicerStatus, mem_metric};
+use gen::{io_thread_slicer, FileSlice, IoSlicerStatus, mem_metric_digit};
 use testre::testre;
 
 #[derive(Debug)]
@@ -88,22 +88,17 @@ fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>
         thread::sleep(Duration::from_millis(250));
         if thread_stopper.load(Ordering::Relaxed) { break; }
         let total_bytes = status.bytes.load(std::sync::atomic::Ordering::Relaxed);
-        let nice_bytes = mem_metric(total_bytes);
         let elapsed = start_f.elapsed();
-        //let ms = elapsed.as_millis();
-
         let sec: f64 = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
-
-
-        let rate = mem_metric((total_bytes as f64 / sec) as usize);
+        let rate = (total_bytes as f64 / sec) as usize;
         let elapsedcpu: Duration = startcpu.elapsed();
         let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
         {
             let curr_file=status.curr_file.lock().unwrap();
             eprint!("{}",
-                format!("{:.2} {}  rate: {:.1} {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}                    \r",
-                nice_bytes.0, nice_bytes.1,
-                rate.0, rate.1,
+                format!("{}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}                    \r",
+                mem_metric_digit(total_bytes,4),
+                mem_metric_digit(rate,4),
                 sec,
                 seccpu,
                 curr_file,
@@ -393,17 +388,18 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     if cfg.verbose >= 1 || cfg.stats {
         let elapsed = start_f.elapsed();
         let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
-        let rate: f64 = (total_bytes as f64 / (1024f64 * 1024f64)) as f64 / sec;
+        let rate: f64 = (total_bytes as f64) as f64 / sec;
         let elapsedcpu: Duration = startcpu.elapsed();
         let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
         eprintln!(
-            "rows: {}  fields: {}  rate: {:.2} MB/s  time(sec): {:.3}  cpu(sec): {:.3}  blocks: {}",
+            "read: {}  blocks: {}  rows: {}  fields: {}  rate: {}/s  time: {:.3}  cpu: {:.3}",
+            mem_metric_digit(total_bytes, 5),
+            total_blocks,
             total_rowcount,
             total_fieldcount,
-            rate,
+            mem_metric_digit(rate as usize, 5),
             sec,
             seccpu,
-            total_blocks
         );
     }
     Ok(())

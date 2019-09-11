@@ -1,23 +1,62 @@
 use std::fmt::Display;
 use std::io::Read;
 
-pub fn mem_metric<'a>(v: usize) -> (f64,&'a str) {
-	const METRIC : [(usize,&str);7] = [
-		(1usize, ""),
-		(1usize<<10, "KB"),
-		(1usize<<20, "MB"),
-		(1usize<<30, "GB"),
-		(1usize<<40, "TB"),
-		(1usize<<50, "PB"),
-		(1usize<<60, "EB")];
+fn mem_metric<'a>(v: usize) -> (f64,&'a str) {
+	const METRIC : [&str;7] = ["B ","KB","MB","GB","TB","PB","EB"];
 
-	for i in 1..METRIC.len() {
-		if v < METRIC[i].0 {
-			return (v as f64 / METRIC[i-1].0 as f64, METRIC[i-1].1);
+	let mut size = 1usize<<10;
+	for i in 0..METRIC.len() {
+		if v < size {
+			return (v as f64 / (size>>10) as f64, &METRIC[i]);
 		}
+		size = size << 10;
 	}
 	(v as f64, "")
 }
+
+/// keep only a few significant digits of a simple float value
+fn sig_dig(v: f64, digits: usize) -> String {
+	let x = format!("{}", v);
+	let mut d = String::new();
+	let mut count = 0;
+	let mut found_pt = false;
+	for c in x.chars() {
+		if c != '.' {
+			count += 1;
+		} else {
+			if count >= digits { break;}
+			found_pt = true;
+		}
+
+		d.push(c);
+
+		if count >= digits && found_pt { break; }
+	}
+	d
+}
+
+pub fn mem_metric_digit(v: usize, sig: usize) -> String {
+	let vt = mem_metric(v);
+	format!("{:>width$} {}", sig_dig(vt.0, sig), vt.1, width=sig+1, )
+}
+
+#[test]
+fn test_mem_metric_digit() -> Result<(), Box<dyn std::error::Error>> {
+	for t in &[ (0,"    0 B "),
+		(1,     "    1 B "),
+		(5,     "    5 B "),
+		(1024,  "    1 KB"),
+		(2524,  "2.464 KB"),
+		(1024*999,  "  999 KB"),
+		(1024*1023, " 1023 KB"),
+		(11usize << 40, "   11 TB")] {
+		//let v = mem_metric(*t);
+		assert_eq!(mem_metric_digit(t.0, 4), t.1, "mem_metric_digit test");
+		println!("{}\n>>>{}<<<\n", t.0, mem_metric_digit(t.0, 4));
+	}
+	Ok(())
+}
+
 
 pub fn greek(v: f64) -> String {
 	const GR_BACKOFF: f64 = 24.0;
