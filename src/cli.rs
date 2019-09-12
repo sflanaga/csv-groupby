@@ -140,6 +140,10 @@ pub struct CliCfg {
     /// list of input files, defaults to stdin
     pub stats: bool,
 
+    #[structopt(long = "no_output")]
+    /// do not write summary output - used for benchmarking and tuning - not useful to you
+    pub no_output: bool,
+
     // #[structopt(long = "exit_on_badblock")]
     // /// Exit when there is an error within a block
     // ///

@@ -39,9 +39,30 @@ pub struct CliCfg {
     #[structopt(short = "k", long = "byfields",   name = "qbyfields", conflicts_with = "qtestre")]
     pub key_fields: Vec<String>,
 }
+mod gen;
+use gen::*;
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg: CliCfg = CliCfg::from_args();
-    println!("DONE\n{:#?}", &cfg);
+    for t in &[ (0,"    0 B "),
+        (1,     "    1 B "),
+        (5,     "    5 B "),
+        (1024,  "    1 KB"),
+        (2524,  "2.464 KB"),
+        (1024*999,  "  999 KB"),
+        (1024*1023, " 1023 KB"),
+        (1024*1024*999, " 1023 KB"),
+        (1024*1024*1024, " 1023 KB"),
+        (1024*1023*1550, " 1023 KB"),
+        (1024*1023*9091, " 1023 KB"),
+        (11usize << 40, "   11 TB")] {
+        //let v = mem_metric(*t);
+        //assert_eq!(mem_metric_digit(t.0, 4), t.1, "mem_metric_digit test");
+        println!("{}\n>>>{}<<<\n", t.0, mem_metric_digit(t.0, 4));
+    }
+
+
+
+        println!("DONE\n{:#?}", &cfg);
     Ok(())
 }

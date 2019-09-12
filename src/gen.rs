@@ -1,13 +1,14 @@
+use std::sync::{Arc,Mutex,atomic::{AtomicUsize, Ordering}};
 use std::fmt::Display;
 use std::io::Read;
 
 fn mem_metric<'a>(v: usize) -> (f64,&'a str) {
-	const METRIC : [&str;7] = ["B ","KB","MB","GB","TB","PB","EB"];
+	const METRIC : [&str;8] = ["B ","KB","MB","GB","TB","PB","EB", "ZB"];
 
 	let mut size = 1usize<<10;
 	for i in 0..METRIC.len() {
 		if v < size {
-			return (v as f64 / (size>>10) as f64, &METRIC[i]);
+			return ( (v as f64 / (size>>10) as f64) as f64, &METRIC[i]);
 		}
 		size = size << 10;
 	}
@@ -109,8 +110,6 @@ pub fn user_pause() {
 	let _it = stdin.read(&mut buf[..]);
 }
 
-use crossbeam_channel as channel;
-use std::sync::{Arc,Mutex,atomic::{AtomicUsize, Ordering}};
 
 #[derive(Debug)]
 pub struct IoSlicerStatus {
@@ -143,7 +142,7 @@ pub fn io_thread_slicer (
 	verbosity: usize,
 	handle: &mut dyn Read,
 	status: &mut Arc<IoSlicerStatus>,
-	send: &channel::Sender<Option<FileSlice>>,
+	send: &crossbeam_channel::Sender<Option<FileSlice>>,
 ) -> Result<(usize, usize), Box<dyn std::error::Error>> {
 
 	if verbosity >= 2 {

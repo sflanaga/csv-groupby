@@ -7,10 +7,19 @@ extern crate num_cpus;
 extern crate prettytable;
 extern crate regex;
 extern crate cpu_time;
+#[cfg(target_os = "linux")]
+extern crate jemallocator;
+#[cfg(target_os = "linux")]
+extern crate jemalloc_ctl;
+
+#[macro_use]
+extern crate structopt;
 
 #[macro_use]
 extern crate lazy_static;
-extern crate structopt;
+
+use cpu_time::ProcessTime;
+
 
 use std::{
     collections::{BTreeMap, HashSet},
@@ -21,31 +30,38 @@ use std::{
     thread,
     sync::{atomic::{AtomicBool,Ordering},Arc},
     time::{Duration, Instant},
-
 };
-
-use cpu_time::ProcessTime;
-use crossbeam_channel as channel;
-use grep_cli::DecompressionReader;
-use regex::Regex;
-
-use prettytable::{cell::Cell, format, row::Row, Table};
-
-use colored::*;
+use std::sync::atomic::Ordering::Relaxed;
+use std::alloc::{GlobalAlloc, System};
 use atty::Stream;
-
-use glob::glob_with;
-use glob::MatchOptions;
+use grep_cli::DecompressionReader;
+use prettytable::{cell::Cell, row::Row, Table, format};
+use regex::{Regex};
 
 type MyMap = BTreeMap<String, KeySum>;
 
 mod cli;
 mod gen;
 mod testre;
+mod mem;
 
 use cli::{get_cli, CliCfg};
 use gen::{io_thread_slicer, FileSlice, IoSlicerStatus, mem_metric_digit};
 use testre::testre;
+use glob::{MatchOptions, glob_with};
+use colored::Colorize;
+
+use mem::{CounterTlsToAtomicUsize, GetAlloc, CounterAtomicUsize, CounterUsize};
+//pub static GLOBAL_TRACKER: std::alloc::System = std::alloc::System;
+//pub static GLOBAL_TRACKER: System = System; //CounterAtomicUsize = CounterAtomicUsize;
+#[cfg(target_os = "linux")]
+#[global_allocator]
+pub static GLOBAL_TRACKER: jemallocator::Jemalloc = jemallocator::Jemalloc;
+
+#[cfg(target_os = "windows")]
+#[global_allocator]
+pub static GLOBAL_TRACKER: System = System;
+
 
 #[derive(Debug)]
 struct KeySum {
@@ -81,7 +97,7 @@ fn main() {
     }
 }
 
-fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>) {
+fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>, send: &crossbeam_channel::Sender<Option<FileSlice>>) {
     let start_f = Instant::now();
     let startcpu = ProcessTime::now();
     loop {
@@ -96,12 +112,13 @@ fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>
         {
             let curr_file=status.curr_file.lock().unwrap();
             eprint!("{}",
-                format!("{}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}                    \r",
+                format!(" q: {}  {}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}  mem: {}                    \r",
+                send.len(),
                 mem_metric_digit(total_bytes,4),
                 mem_metric_digit(rate,4),
                 sec,
                 seccpu,
-                curr_file,
+                curr_file, mem_metric_digit(GLOBAL_TRACKER.get_alloc(),4),
                 ).green()
             );
         }
@@ -111,6 +128,10 @@ fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>
 
 fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = get_cli()?;
+
+    if cfg.verbose >= 1 {
+        eprintln!("Global allocator: {:#?}", GLOBAL_TRACKER);
+    }
 
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
@@ -128,7 +149,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     /////////////////////////////////////////////////////////////////////////////////////////////////
 
     let mut worker_handler = vec![];
-    let (send, recv): (channel::Sender<Option<FileSlice>>, channel::Receiver<Option<FileSlice>>) = channel::bounded(cfg.thread_qsize);
+    let (send, recv): (crossbeam_channel::Sender<Option<FileSlice>>, crossbeam_channel::Receiver<Option<FileSlice>>) = crossbeam_channel::bounded(cfg.thread_qsize);
 
     for no_threads in 0..cfg.no_threads {
         let cfg = cfg.clone();
@@ -169,7 +190,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let ticker = {
         if do_ticker {
             let mut io_status_cloned = io_status.clone();
-            Some(thread::spawn(move || { stat_ticker(thread_stopper, &mut io_status_cloned) }))
+            let clone_send = send.clone();
+
+            Some(thread::spawn(move || { stat_ticker(thread_stopper, &mut io_status_cloned, &clone_send)}))
         } else {
             None
         }
@@ -248,7 +271,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         total_fieldcount += fieldcount;
         all_the_maps.push(map);
     }
-    sum_maps(&mut main_map, all_the_maps, cfg.verbose);
+    if !cfg.no_output {
+        sum_maps(&mut main_map, all_the_maps, cfg.verbose);
+    }
 
     stopper.swap(true, Ordering::Relaxed);
 
@@ -268,120 +293,122 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if do_ticker { eprintln!(); } // write extra line at the end of stderr in case the ticker munges things
-    if !cfg.csv_output {
-        let celltable = std::cell::RefCell::new(Table::new());
-        celltable.borrow_mut().set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
-        {
-            let mut vcell = vec![];
-            if cfg.key_fields.len() > 0 {
-                for x in &cfg.key_fields {
-                    vcell.push(Cell::new(&format!("k:{}", re_mod_idx(&cfg, *x))));
-                }
-            } else {
-                vcell.push(Cell::new("k:-"));
-            }
-            if !cfg.no_record_count {
-                vcell.push(Cell::new("count"));
-            }
-            for x in &cfg.sum_fields {
-                vcell.push(Cell::new(&format!("s:{}", re_mod_idx(&cfg, *x))));
-            }
-            for x in &cfg.avg_fields {
-                vcell.push(Cell::new(&format!("a:{}", re_mod_idx(&cfg, *x))));
-            }
-            for x in &cfg.unique_fields {
-                vcell.push(Cell::new(&format!("u:{}", re_mod_idx(&cfg, *x))));
-            }
-            let row = Row::new(vcell);
-            celltable.borrow_mut().set_titles(row);
-        }
-
-        for (ff, cc) in &main_map {
-            let mut vcell = vec![];
-            let z1: Vec<&str> = ff.split('|').collect();
-            for x in &z1 {
-                if x.len() <= 0 {
-                    vcell.push(Cell::new(&cfg.empty));
+    if !cfg.no_output {
+        if !cfg.csv_output {
+            let celltable = std::cell::RefCell::new(Table::new());
+            celltable.borrow_mut().set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+            {
+                let mut vcell = vec![];
+                if cfg.key_fields.len() > 0 {
+                    for x in &cfg.key_fields {
+                        vcell.push(Cell::new(&format!("k:{}", re_mod_idx(&cfg, *x))));
+                    }
                 } else {
-                    vcell.push(Cell::new(&x.to_string()));
+                    vcell.push(Cell::new("k:-"));
                 }
+                if !cfg.no_record_count {
+                    vcell.push(Cell::new("count"));
+                }
+                for x in &cfg.sum_fields {
+                    vcell.push(Cell::new(&format!("s:{}", re_mod_idx(&cfg, *x))));
+                }
+                for x in &cfg.avg_fields {
+                    vcell.push(Cell::new(&format!("a:{}", re_mod_idx(&cfg, *x))));
+                }
+                for x in &cfg.unique_fields {
+                    vcell.push(Cell::new(&format!("u:{}", re_mod_idx(&cfg, *x))));
+                }
+                let row = Row::new(vcell);
+                celltable.borrow_mut().set_titles(row);
             }
 
-            if !cfg.no_record_count {
-                vcell.push(Cell::new(&format!("{}", cc.count)));
-            }
-            for x in &cc.sums {
-                vcell.push(Cell::new(&format!("{}", x)));
-            }
-            for x in &cc.avgs {
-                if x.1 <= 0 {
-                    vcell.push(Cell::new("unknown"));
-                } else {
-                    vcell.push(Cell::new(&format!("{}", (x.0/(x.1 as f64)) )));
+            for (ff, cc) in &main_map {
+                let mut vcell = vec![];
+                let z1: Vec<&str> = ff.split('|').collect();
+                for x in &z1 {
+                    if x.len() <= 0 {
+                        vcell.push(Cell::new(&cfg.empty));
+                    } else {
+                        vcell.push(Cell::new(&x.to_string()));
+                    }
                 }
-            }
-            for x in &cc.distinct {
-                vcell.push(Cell::new(&format!("{}", x.len())));
-            }
-            let row = Row::new(vcell);
-            celltable.borrow_mut().add_row(row);
-        }
 
-        celltable.borrow_mut().printstd();
-    } else {
-        {
-            let mut vcell = vec![];
-            if cfg.key_fields.len() > 0 {
-                for x in &cfg.key_fields {
-                    vcell.push(format!("k:{}", re_mod_idx(&cfg, *x)));
+                if !cfg.no_record_count {
+                    vcell.push(Cell::new(&format!("{}", cc.count)));
                 }
-            } else {
-                vcell.push("k:-".to_string());
+                for x in &cc.sums {
+                    vcell.push(Cell::new(&format!("{}", x)));
+                }
+                for x in &cc.avgs {
+                    if x.1 <= 0 {
+                        vcell.push(Cell::new("unknown"));
+                    } else {
+                        vcell.push(Cell::new(&format!("{}", (x.0 / (x.1 as f64)))));
+                    }
+                }
+                for x in &cc.distinct {
+                    vcell.push(Cell::new(&format!("{}", x.len())));
+                }
+                let row = Row::new(vcell);
+                celltable.borrow_mut().add_row(row);
             }
-            if !cfg.no_record_count {
-                vcell.push("count".to_string());
-            }
-            for x in &cfg.sum_fields {
-                vcell.push(format!("s:{}", re_mod_idx(&cfg, *x)));
-            }
-            for x in &cfg.avg_fields {
-                vcell.push(format!("a:{}", re_mod_idx(&cfg, *x)));
-            }
-            for x in &cfg.unique_fields {
-                vcell.push(format!("u:{}", re_mod_idx(&cfg, *x)));
-            }
-            println!("{}", vcell.join(&cfg.od));
-        }
-        let mut thekeys: Vec<String> = Vec::new();
-        for (k, _v) in &main_map {
-            thekeys.push(k.clone());
-        }
-        thekeys.sort_unstable();
-        // tain(|ff,cc| {
-        for ff in thekeys.iter() {
-            let mut vcell = vec![];
-            let z1: Vec<String> = ff.split('|').map(|x| x.to_string()).collect();
-            for x in &z1 {
-                if x.len() <= 0 {
-                    vcell.push(format!("{}", cfg.empty));
+
+            celltable.borrow_mut().printstd();
+        } else {
+            {
+                let mut vcell = vec![];
+                if cfg.key_fields.len() > 0 {
+                    for x in &cfg.key_fields {
+                        vcell.push(format!("k:{}", re_mod_idx(&cfg, *x)));
+                    }
                 } else {
+                    vcell.push("k:-".to_string());
+                }
+                if !cfg.no_record_count {
+                    vcell.push("count".to_string());
+                }
+                for x in &cfg.sum_fields {
+                    vcell.push(format!("s:{}", re_mod_idx(&cfg, *x)));
+                }
+                for x in &cfg.avg_fields {
+                    vcell.push(format!("a:{}", re_mod_idx(&cfg, *x)));
+                }
+                for x in &cfg.unique_fields {
+                    vcell.push(format!("u:{}", re_mod_idx(&cfg, *x)));
+                }
+                println!("{}", vcell.join(&cfg.od));
+            }
+            let mut thekeys: Vec<String> = Vec::new();
+            for (k, _v) in &main_map {
+                thekeys.push(k.clone());
+            }
+            thekeys.sort_unstable();
+            // tain(|ff,cc| {
+            for ff in thekeys.iter() {
+                let mut vcell = vec![];
+                let z1: Vec<String> = ff.split('|').map(|x| x.to_string()).collect();
+                for x in &z1 {
+                    if x.len() <= 0 {
+                        vcell.push(format!("{}", cfg.empty));
+                    } else {
+                        vcell.push(format!("{}", x));
+                    }
+                }
+                let cc = main_map.get(ff).unwrap();
+                if !cfg.no_record_count {
+                    vcell.push(format!("{}", cc.count));
+                }
+                for x in &cc.sums {
                     vcell.push(format!("{}", x));
                 }
+                for x in &cc.avgs {
+                    vcell.push(format!("{}", x.0 / (x.1 as f64)));
+                }
+                for x in &cc.distinct {
+                    vcell.push(format!("{}", x.len()));
+                }
+                println!("{}", vcell.join(&cfg.od));
             }
-            let cc = main_map.get(ff).unwrap();
-            if !cfg.no_record_count {
-                vcell.push(format!("{}", cc.count));
-            }
-            for x in &cc.sums {
-                vcell.push(format!("{}", x));
-            }
-            for x in &cc.avgs {
-                vcell.push(format!("{}", x.0/(x.1 as f64)));
-            }
-            for x in &cc.distinct {
-                vcell.push(format!("{}", x.len()));
-            }
-            println!("{}", vcell.join(&cfg.od));
         }
     }
 
@@ -392,7 +419,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         let elapsedcpu: Duration = startcpu.elapsed();
         let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
         eprintln!(
-            "read: {}  blocks: {}  rows: {}  fields: {}  rate: {}/s  time: {:.3}  cpu: {:.3}",
+            "read: {}  blocks: {}  rows: {}  fields: {}  rate: {}/s  time: {:.3}  cpu: {:.3}  mem: {}",
             mem_metric_digit(total_bytes, 5),
             total_blocks,
             total_rowcount,
@@ -400,12 +427,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             mem_metric_digit(rate as usize, 5),
             sec,
             seccpu,
+            mem_metric_digit(GLOBAL_TRACKER.get_alloc(),4)
         );
     }
     Ok(())
 }
 
-fn worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
+fn worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
     // return lines / fields
     match _worker_re(cfg, recv) {
         Ok((map, lines, fields)) => return (map, lines, fields),
@@ -416,7 +444,7 @@ fn worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> (MyMa
     }
 }
 
-fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
+fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = MyMap::new();
@@ -461,7 +489,7 @@ fn _worker_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> Resu
     Ok((map, rowcount, fieldcount))
 }
 
-fn worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
+fn worker_csv(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
     match _worker_csv(cfg, recv) {
         Ok((map, lines, fields)) => return (map, lines, fields),
         Err(e) => {
@@ -471,7 +499,7 @@ fn worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> (MyM
     }
 }
 
-fn _worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
+fn _worker_csv(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = MyMap::new();
@@ -505,7 +533,7 @@ fn _worker_csv(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> Res
     Ok((map, rowcount, fieldcount))
 }
 
-fn worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
+fn worker_multi_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
     // return lines / fields
     match _worker_multi_re(cfg, recv) {
         Ok((map, lines, fields)) => return (map, lines, fields),
@@ -524,7 +552,7 @@ fn grow_str_vec_or_add(idx: usize, v: &mut Vec<String>, s: &str) {
     }
 }
 
-fn _worker_multi_re(cfg: &CliCfg, recv: &channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
+fn _worker_multi_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = MyMap::new();

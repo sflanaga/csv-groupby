@@ -1,6 +1,6 @@
 [package]
 name = "csv"
-version = "0.5.3"
+version = "0.5.4"
 authors = ["Steve Flanagan"]
 
 description="sql group by on arbitrary text or csv files"
@@ -34,6 +34,10 @@ name = "quick"
 path = "src/quick.rs"
 
 
+[target.'cfg(target_os = "linux")'.dependencies]
+jemallocator = "0.3.2"
+jemalloc-ctl = "0.3.3"
+
 [dependencies]
 #structopt = {version = "0.2.18", feature=["color","termsize","wrap_help"]}
 structopt = {version = "0.3.1", feature=["color","termsize","wrap_help"]}
@@ -41,7 +45,7 @@ cpu-time = "0.1.0"
 atty = "0.2"
 csv = "~1"
 grep-cli = "0.1.3"
-regex = "~1"
+regex = "1.3.1"
 glob = "0.3.0"
 prettytable-rs = "~0.6"
 chan = "~0.1.21"
