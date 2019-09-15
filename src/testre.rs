@@ -1,6 +1,6 @@
 use std::io::prelude::*;
 
-use cli::CliCfg;
+use crate::cli::CliCfg;
 use regex::Regex;
 
 pub fn testre(c: &CliCfg) -> Result<(), Box<dyn std::error::Error>> {

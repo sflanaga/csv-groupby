@@ -2,7 +2,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use regex::Regex;
+
 use structopt::StructOpt;
+use lazy_static::lazy_static;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 

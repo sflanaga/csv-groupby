@@ -1,12 +1,8 @@
 use std::alloc::{System, GlobalAlloc, Layout};
-use std::sync::{Arc,atomic::{AtomicUsize, Ordering::SeqCst, Ordering::Relaxed}};
+use std::sync::{atomic::{AtomicUsize, Ordering::Relaxed}};
 
 #[cfg(target_os = "linux")]
 use jemallocator::Jemalloc;
-
-#[cfg(target_os = "linux")]
-extern crate jemalloc_ctl;
-
 #[cfg(target_os = "linux")]
 use jemalloc_ctl::{stats, epoch};
 

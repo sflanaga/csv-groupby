@@ -1,40 +1,16 @@
-extern crate atty;
-extern crate colored;
-extern crate crossbeam_channel;
-extern crate glob;
-extern crate grep_cli;
-extern crate num_cpus;
-extern crate prettytable;
-extern crate regex;
-extern crate cpu_time;
-#[cfg(target_os = "linux")]
-extern crate jemallocator;
-#[cfg(target_os = "linux")]
-extern crate jemalloc_ctl;
-
-#[macro_use]
-extern crate structopt;
-
-#[macro_use]
-extern crate lazy_static;
-
-use cpu_time::ProcessTime;
-
+#![allow(dead_code)]
+#![allow(unused_imports)]
 
 use std::{
     collections::{BTreeMap, HashSet},
-    fmt::Display,
-    fs,
     io::prelude::*,
     path::PathBuf,
     thread,
     sync::{atomic::{AtomicBool,Ordering},Arc},
     time::{Duration, Instant},
 };
-use std::sync::atomic::Ordering::Relaxed;
-use std::alloc::{GlobalAlloc, System};
+use std::alloc::{System};
 use atty::Stream;
-use grep_cli::DecompressionReader;
 use prettytable::{cell::Cell, row::Row, Table, format};
 use regex::{Regex};
 
@@ -46,10 +22,11 @@ mod testre;
 mod mem;
 
 use cli::{get_cli, CliCfg};
-use gen::{io_thread_slicer, FileSlice, IoSlicerStatus, mem_metric_digit};
+use gen::{io_thread_slicer, FileSlice, IoSlicerStatus, mem_metric_digit, per_file_thread};
 use testre::testre;
 use glob::{MatchOptions, glob_with};
 use colored::Colorize;
+use cpu_time::ProcessTime;
 
 use mem::{CounterTlsToAtomicUsize, GetAlloc, CounterAtomicUsize, CounterUsize};
 //pub static GLOBAL_TRACKER: std::alloc::System = std::alloc::System;
@@ -148,49 +125,64 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
     /////////////////////////////////////////////////////////////////////////////////////////////////
 
-    let mut worker_handler = vec![];
-    let (send, recv): (crossbeam_channel::Sender<Option<FileSlice>>, crossbeam_channel::Receiver<Option<FileSlice>>) = crossbeam_channel::bounded(cfg.thread_qsize);
+    let mut worker_handlers = vec![];
+    let (send_fileslice, recv_fileslice): (crossbeam_channel::Sender<Option<FileSlice>>, crossbeam_channel::Receiver<Option<FileSlice>>) =
+        crossbeam_channel::bounded(cfg.thread_qsize);
 
     for no_threads in 0..cfg.no_threads {
         let cfg = cfg.clone();
-        let clone_recv = recv.clone();
+        let clone_recv_fileslice = recv_fileslice.clone();
 
         let h = match cfg.re_str.len() {
             0 => thread::Builder::new()
                 .name(format!("worker_csv{}", no_threads))
-                .spawn(move || worker_csv(&cfg, &clone_recv))
+                .spawn(move || worker_csv(&cfg, &clone_recv_fileslice))
                 .unwrap(),
             1 => thread::Builder::new()
                 .name(format!("worker_re{}", no_threads))
-                .spawn(move || worker_re(&cfg, &clone_recv))
+                .spawn(move || worker_re(&cfg, &clone_recv_fileslice))
                 .unwrap(),
             _ => thread::Builder::new()
                 .name(format!("wr_mul_re{}", no_threads))
-                .spawn(move || worker_multi_re(&cfg, &clone_recv))
+                .spawn(move || worker_multi_re(&cfg, &clone_recv_fileslice))
                 .unwrap(),
         };
-        worker_handler.push(h);
+        worker_handlers.push(h);
     }
 
     // SETUP IO
+    let do_stdin = cfg.files.len() <= 0 && cfg.glob.is_none();
+    let mut io_status = Arc::new(IoSlicerStatus::new());
     let block_size = match cfg.block_size_b {
         0 => cfg.block_size_k * 1024,
         _ => cfg.block_size_b,
     };
 
-    let do_stdin = cfg.files.len() <= 0 && cfg.glob.is_none();
+    // IO slicer threads
+    let mut io_handler = vec![];
+    let (send_pathbuff, recv_pathbuff): (crossbeam_channel::Sender<Option<PathBuf>>, crossbeam_channel::Receiver<Option<PathBuf>>) = crossbeam_channel::bounded(cfg.thread_qsize);
+    for no_threads in 0..cfg.no_threads {
+        let cfg = cfg.clone();
+        let clone_recv_pathbuff = recv_pathbuff.clone();
+        let clone_send_fileslice = send_fileslice.clone();
+        let io_status_cloned = io_status.clone();
+        let h = thread::Builder::new()
+            .name(format!("worker_io{}", no_threads))
+            .spawn(move || per_file_thread(&clone_recv_pathbuff, &clone_send_fileslice, block_size, cfg.verbose, io_status_cloned))
+            .unwrap();
+        io_handler.push(h);
+    }
 
     //
-    // setup statistics ticker thread in case we get bored waiting on things
+    // TICKER - setup statistics ticker thread in case we get bored waiting on things
     //
     let stopper = Arc::new(AtomicBool::new(false));
     let thread_stopper = stopper.clone();
-    let mut io_status = Arc::new(IoSlicerStatus::new());
-    let do_ticker = atty::is(Stream::Stderr) && !do_stdin && !(cfg.verbose >= 3);
-    let ticker = {
+    let do_ticker = atty::is(Stream::Stderr) && /* !do_stdin && */ !(cfg.verbose >= 3);
+    let _ticker = {
         if do_ticker {
             let mut io_status_cloned = io_status.clone();
-            let clone_send = send.clone();
+            let clone_send = send_fileslice.clone();
 
             Some(thread::spawn(move || { stat_ticker(thread_stopper, &mut io_status_cloned, &clone_send)}))
         } else {
@@ -199,46 +191,20 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     //
-    // forward all IO to the block queue
+    // FILE - setup feed by the source of data
     //
-    let per_file = |filename: &PathBuf| {
-        let metadata = match fs::metadata(&filename) {
-            Ok(m) => m,
-            Err(err) => {
-                eprintln!("skipping file \"{}\", could not get stats on it, cause: {}", filename.display(), err);
-                return Ok((0, 0));
-            }
-        };
-        if !metadata.is_file() {
-            return Ok((0, 0));
-        }
-
-        if cfg.verbose >= 1 {
-            eprintln!("processing file: {}", filename.display());
-        }
-        let mut rdr = DecompressionReader::new(&filename)?;
-        // let mut f = match OpenOptions::new().read(true).write(false).create(false).open(&filename) {
-        //     Ok(f) => f,
-        //     Err(e) => panic!("cannot open file \"{}\" due to this error: {}", filename.display(), e),
-        // };
-        io_thread_slicer(&filename.display(), block_size, cfg.verbose, &mut rdr, &mut io_status.clone(), &send)
-    };
-
-
     if do_stdin {
         eprintln!("{}", "<<< reading from stdin".red());
         let stdin = std::io::stdin();
         let mut handle = stdin; // .lock();
 
-        let (blocks, bytes) = io_thread_slicer(&"STDIO".to_string(), block_size, cfg.verbose, &mut handle, &mut io_status, &send)?;
+        let (blocks, bytes) = io_thread_slicer(&"STDIO".to_string(), block_size, cfg.verbose, &mut handle, &mut io_status, &send_fileslice)?;
         total_bytes += bytes;
         total_blocks += blocks;
     } else if cfg.files.len() > 0 {
         let filelist = &cfg.files;
-        for filename in filelist {
-            let (blocks, bytes) = per_file(&filename)?;
-            total_blocks += blocks;
-            total_bytes += bytes;
+        for path in filelist {
+            send_pathbuff.send(Some(path.clone())).expect("Unable to send path to queue");
         }
     } else {
         let options = MatchOptions {
@@ -248,24 +214,28 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         };
         for entry in glob_with(&(cfg.glob.as_ref().expect("NO glob found when expected")), options).unwrap() {
             if let Ok(path) = entry {
-                let (blocks, bytes) = per_file(&path)?;
-                total_blocks += blocks;
-                total_bytes += bytes;
+                send_pathbuff.send(Some(path.clone())).expect("Unable to send path to queue");
             }
         }
     }
+    if cfg.verbose > 1 { eprintln!("sending stops to thread"); }
 
-    // total_blocks += blocks;
-    // total_bytes += bytes;
-
-    // tell threads that IO is over
     for _i in 0..cfg.no_threads {
-        send.send(None)?;
+        send_pathbuff.send(None)?;
+    }
+    if cfg.verbose > 1 { eprintln!("joining io handles"); }
+    for h in io_handler {
+        let (blocks, bytes) = h.join().unwrap();
+        total_bytes += bytes; total_blocks += blocks;
     }
 
+    // proc workers on slices can ONLY be told to stop AFTER the IO threads are done
+    for _i in 0..cfg.no_threads {
+        send_fileslice.send(None)?;
+    }
     // merge the data from the workers
     let mut all_the_maps = vec![];
-    for h in worker_handler {
+    for h in worker_handlers {
         let (map, linecount, fieldcount) = h.join().unwrap();
         total_rowcount += linecount;
         total_fieldcount += fieldcount;
@@ -450,7 +420,7 @@ fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>
     let mut map = MyMap::new();
 
     let re_str = &cfg.re_str[0];
-
+    if cfg.verbose > 2 { eprintln!("Start of {}", thread::current().name().unwrap()); }
     let re = match Regex::new(re_str) {
         Err(err) => panic!("Cannot parse regular expression {}, error = {}", re_str, err),
         Ok(r) => r,
@@ -463,6 +433,7 @@ fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
             None => {
+                if cfg.verbose > 1 { eprintln!("{} exit on None", thread::current().name().unwrap())}
                 break;
             }
         };
@@ -515,6 +486,7 @@ fn _worker_csv(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice
         let fc = match recv.recv().unwrap() {
             Some(fc) => fc,
             None => {
+                if cfg.verbose > 1 { eprintln!("{} exit on None", thread::current().name().unwrap())}
                 break;
             }
         };
@@ -577,6 +549,7 @@ fn _worker_multi_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<File
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
             None => {
+                if cfg.verbose > 1 { eprintln!("{} exit on None", thread::current().name().unwrap())}
                 break;
             }
         };
@@ -751,3 +724,6 @@ fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
         println!("re thread merge maps time: {:?}", dur);
     }
 }
+
+
+

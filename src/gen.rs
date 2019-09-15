@@ -1,6 +1,9 @@
 use std::sync::{Arc,Mutex,atomic::{AtomicUsize, Ordering}};
 use std::fmt::Display;
 use std::io::Read;
+use std::path::PathBuf;
+use std::{fs, thread};
+use grep_cli::DecompressionReader;
 
 fn mem_metric<'a>(v: usize) -> (f64,&'a str) {
 	const METRIC : [&str;8] = ["B ","KB","MB","GB","TB","PB","EB", "ZB"];
@@ -37,8 +40,11 @@ fn sig_dig(v: f64, digits: usize) -> String {
 }
 
 pub fn mem_metric_digit(v: usize, sig: usize) -> String {
+    if v <= 0 || v > std::usize::MAX/2 {
+        format!("{:>width$}", "unknown", width=sig+3);
+    }
 	let vt = mem_metric(v);
-	format!("{:>width$} {}", sig_dig(vt.0, sig), vt.1, width=sig+1, )
+    format!("{:>width$} {}", sig_dig(vt.0, sig), vt.1, width=sig+1, )
 }
 
 #[test]
@@ -250,4 +256,45 @@ pub fn io_thread_slicer (
 		}
 	}
 	Ok((block_count, bytes))
+}
+
+pub fn per_file_thread(recv_pathbuff: &crossbeam_channel::Receiver<Option<PathBuf>>,
+					   send_fileslice: &crossbeam_channel::Sender<Option<FileSlice>>,
+					   block_size: usize, verbosity: usize, mut io_status: Arc<IoSlicerStatus>) -> (usize,usize) {
+	let mut block_count = 0usize;
+	let mut bytes = 0usize;
+	loop {
+		let filename = match recv_pathbuff.recv().expect("thread failed to get next job from channel") {
+			Some(path) => path,
+			None => {
+				if verbosity > 1 { eprintln!("slicer exit on None {}", thread::current().name().unwrap()); }
+				return (block_count, bytes);
+			}
+		};
+		let metadata = match fs::metadata(&filename) {
+			Ok(m) => m,
+			Err(err) => {
+				eprintln!("skipping file \"{}\", could not get stats on it, cause: {}", filename.display(), err);
+				continue;
+			}
+		};
+		if !metadata.is_file() {
+			continue;
+		}
+
+		if verbosity >= 1 {
+			eprintln!("processing file: {}", filename.display());
+		}
+		let mut rdr = match DecompressionReader::new(&filename) {
+			Ok(rdr) => rdr,
+			Err(err) => {
+				eprintln!("skipping file \"{}\", due to error: {}", filename.display(), err);
+				continue;
+			}
+		};
+		match io_thread_slicer(&filename.display(), block_size, verbosity, &mut rdr, &mut io_status, &send_fileslice) {
+			Ok((bc, by)) => { block_count += bc; bytes += by; },
+			Err(err) => eprintln!("error io slicing {}, error: {}", &filename.display(), err),
+		}
+	}
 }

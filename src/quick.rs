@@ -1,68 +1,55 @@
-#[macro_use]
-extern crate structopt;
-
-use std::time::Duration;
-
+use crossbeam_channel::bounded;
 use std::thread;
 
-
-use structopt::StructOpt;
-
 fn main() {
-    if let Err(err) = run() {
-        match err {
-            _ => {
-                eprintln!("error: {}", &err);
-                std::process::exit(1);
-            }
+    let (s1, r1) = bounded(4);
+    let (s2, r2) = bounded(2);
+
+    let s1_c = s1.clone();
+    let h1 = thread::spawn(move || {
+        for i in 0..10 {
+            //thread::sleep(Duration::from_millis(100));
+            s1_c.send(Some(i)).expect("error in send");
         }
-    }
-}
+        println!("done sending");
+    });
+    let mut h_1 = vec![];
 
-#[derive(StructOpt, Debug, Clone)]
-#[structopt(
-    name = "quick",
-    //global_settings(&[structopt::clap::AppSettings::ColoredHelp, structopt::clap::AppSettings::VersionlessSubcommands])
-)]
-pub struct CliCfg {
-//     #[structopt(short = "a", long = "aa", name = "aa", conflicts_with = "bb")]
-//     pub test: Vec<String>,
-
-//     #[structopt(short = "b", long = "bb",   name = "bb", conflicts_with = "aa")]
-//     pub key_fields: Vec<String>,
-// }
-
-    #[structopt(short = "t", long = "testre",          name = "qtestre",                             conflicts_with = "qbyfields")]
-    pub test: Vec<String>,
- 
-
-    #[structopt(short = "k", long = "byfields",   name = "qbyfields", conflicts_with = "qtestre")]
-    pub key_fields: Vec<String>,
-}
-mod gen;
-use gen::*;
-
-fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let mut cfg: CliCfg = CliCfg::from_args();
-    for t in &[ (0,"    0 B "),
-        (1,     "    1 B "),
-        (5,     "    5 B "),
-        (1024,  "    1 KB"),
-        (2524,  "2.464 KB"),
-        (1024*999,  "  999 KB"),
-        (1024*1023, " 1023 KB"),
-        (1024*1024*999, " 1023 KB"),
-        (1024*1024*1024, " 1023 KB"),
-        (1024*1023*1550, " 1023 KB"),
-        (1024*1023*9091, " 1023 KB"),
-        (11usize << 40, "   11 TB")] {
-        //let v = mem_metric(*t);
-        //assert_eq!(mem_metric_digit(t.0, 4), t.1, "mem_metric_digit test");
-        println!("{}\n>>>{}<<<\n", t.0, mem_metric_digit(t.0, 4));
+    for h in 0..4 {
+        let r1_c = r1.clone();
+        let s2_c = s2.clone();
+        let hand = thread::spawn(move || loop {
+            if let Some(v) = r1_c.recv().unwrap() {
+                //thread::sleep(Duration::from_millis(100));
+                println!("{}: mid  {}", h, v);
+                s2_c.send(Some(v)).expect("error in send ph2");
+            } else {
+                println!("returning p1");
+                return;
+            }
+        });
+        h_1.push(hand);
     }
 
-
-
-        println!("DONE\n{:#?}", &cfg);
-    Ok(())
+    let mut h_2 = vec![];
+    for h in 0..4 {
+        let r2_c = r2.clone();
+        let hand = thread::spawn(move || loop {
+            if let Some(v) = r2_c.recv().unwrap() {
+                println!("{}: last {}", h, v);
+            } else {
+                println!("returning p2");
+                return;
+            }
+        });
+        h_2.push(hand);
+    }
+    h1.join().expect("error joining h1");
+    println!("sending nones");
+    for _ in 0..4  {
+        s1.send(None).unwrap();
+        s2.send(None).unwrap();
+    }
+    h_1.into_iter().for_each(|x| x.join().expect("error joining h_1"));
+    h_2.into_iter().for_each(|x| x.join().expect("error joining h_2"));
 }
