@@ -12,7 +12,7 @@ use std::{
 use std::alloc::{System};
 use atty::Stream;
 use prettytable::{cell::Cell, row::Row, Table, format};
-use regex::{Regex};
+use regex::{Regex, CaptureLocations};
 
 type MyMap = BTreeMap<String, KeySum>;
 
@@ -29,6 +29,8 @@ use colored::Colorize;
 use cpu_time::ProcessTime;
 
 use mem::{CounterTlsToAtomicUsize, GetAlloc, CounterAtomicUsize, CounterUsize};
+use std::ops::Index;
+
 //pub static GLOBAL_TRACKER: std::alloc::System = std::alloc::System;
 //pub static GLOBAL_TRACKER: System = System; //CounterAtomicUsize = CounterAtomicUsize;
 #[cfg(target_os = "linux")]
@@ -204,7 +206,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     } else if cfg.files.len() > 0 {
         let filelist = &cfg.files;
         for path in filelist {
-            send_pathbuff.send(Some(path.clone())).expect("Unable to send path to queue");
+            send_pathbuff.send(Some(path.clone())).expect(&format!("Unable to send path: {} to path queue", path.display()));
         }
     } else {
         let options = MatchOptions {
@@ -212,9 +214,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             require_literal_separator: false,
             require_literal_leading_dot: false,
         };
-        for entry in glob_with(&(cfg.glob.as_ref().expect("NO glob found when expected")), options).unwrap() {
+        for entry in glob_with(&(cfg.glob.as_ref().expect(&format!("glob unparseable or non existent: {}", cfg.glob.as_ref().unwrap()))), options).unwrap() {
             if let Ok(path) = entry {
-                send_pathbuff.send(Some(path.clone())).expect("Unable to send path to queue");
+                send_pathbuff.send(Some(path.clone())).expect(&format!("Unable to send path: {} to path queue", path.display()));
             }
         }
     }
@@ -413,6 +415,28 @@ fn worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>
         }
     }
 }
+#[derive(Debug)]
+struct CapWrap<'t> {
+    pub cl: &'t CaptureLocations,
+    pub text: &'t str,
+}
+//T: std::ops::Index<usize> + std::fmt::Debug,
+//<T as std::ops::Index<usize>>::Output: AsRef<str>,
+
+impl<'t> Index<usize> for CapWrap<'t> {
+    type Output = str;
+
+    fn index(&self, i: usize) -> &str {
+        self.cl.get(i)
+            .map(|m| &self.text[m.0 .. m.1])
+            .unwrap_or_else(|| panic!("no group at index '{}'", i))
+    }
+}
+impl<'t> CapWrap<'t> {
+    fn len(&self) -> usize {
+        self.cl.len()
+    }
+}
 
 fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
@@ -437,6 +461,7 @@ fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>
                 break;
             }
         };
+        let mut cl = re.capture_locations();
         if !cfg.noop_proc {
             for line in fc.block[0..fc.len].lines() {
                 let line = line?;
@@ -449,8 +474,9 @@ fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>
                     }
                 }
 
-                if let Some(record) = re.captures(line.as_str()) {
-                    fieldcount += store_rec(&mut buff, &line, &record, record.len(), &mut map, &cfg, &mut rowcount);
+                if let Some(record) = re.captures_read(&mut cl,line.as_str()) {
+                    let cw = CapWrap {cl: &cl, text: line.as_str()};
+                    fieldcount += store_rec(&mut buff, &line, &cw, cw.len(), &mut map, &cfg, &mut rowcount);
                 } else {
                     _skipped += 1;
                 }
@@ -523,6 +549,7 @@ fn grow_str_vec_or_add(idx: usize, v: &mut Vec<String>, s: &str) {
         v.push(String::from(s));
     }
 }
+
 
 fn _worker_multi_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields

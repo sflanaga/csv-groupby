@@ -1,7 +1,28 @@
 use crossbeam_channel::bounded;
 use std::thread;
+use pcre2::bytes::{Regex, Captures};
+use bstr::{BStr, ByteSlice};
+use std::str::from_utf8;
 
 fn main() {
+    let s = "dog,cat,cow";
+//milk,bread,flour
+//1,2,3
+//";
+
+    let re = Regex::new("^[^,]+,([^,]+),[^,]+$").unwrap();
+    let caps = re.captures(s.as_bytes()).unwrap().expect("should match");
+    for i in 0 .. caps.len() {
+        //println!("{}", from_utf8(caps.get(i).unwrap().as_bytes()).unwrap());
+        println!("{}",caps.get(i).unwrap().as_bytes().to_str_lossy());
+    }
+
+
+}
+
+
+fn test_mpmc() {
+
     let (s1, r1) = bounded(4);
     let (s2, r2) = bounded(2);
 
