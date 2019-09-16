@@ -13,6 +13,7 @@ use std::alloc::{System};
 use atty::Stream;
 use prettytable::{cell::Cell, row::Row, Table, format};
 use regex::{Regex, CaptureLocations};
+use pcre2::bytes::{Regex as Regex_pre2, Captures as Captures_pcre2, CaptureLocations as CaptureLocations_pcre2};
 
 type MyMap = BTreeMap<String, KeySum>;
 
@@ -111,6 +112,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     if cfg.verbose >= 1 {
         eprintln!("Global allocator: {:#?}", GLOBAL_TRACKER);
     }
+    if pcre2::is_jit_available() { eprintln!("pcre2 JIT is available"); }
 
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
@@ -415,9 +417,11 @@ fn worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>
         }
     }
 }
+
+
 #[derive(Debug)]
 struct CapWrap<'t> {
-    pub cl: &'t CaptureLocations,
+    pub cl: &'t CaptureLocations_pcre2,
     pub text: &'t str,
 }
 //T: std::ops::Index<usize> + std::fmt::Debug,
@@ -428,10 +432,11 @@ impl<'t> Index<usize> for CapWrap<'t> {
 
     fn index(&self, i: usize) -> &str {
         self.cl.get(i)
-            .map(|m| &self.text[m.0 .. m.1])
+            .map(|m| &self.text[m.0..m.1])
             .unwrap_or_else(|| panic!("no group at index '{}'", i))
     }
 }
+
 impl<'t> CapWrap<'t> {
     fn len(&self) -> usize {
         self.cl.len()
@@ -445,7 +450,7 @@ fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>
 
     let re_str = &cfg.re_str[0];
     if cfg.verbose > 2 { eprintln!("Start of {}", thread::current().name().unwrap()); }
-    let re = match Regex::new(re_str) {
+    let re = match Regex_pre2::new(re_str) {
         Err(err) => panic!("Cannot parse regular expression {}, error = {}", re_str, err),
         Ok(r) => r,
     };
@@ -457,7 +462,7 @@ fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
             None => {
-                if cfg.verbose > 1 { eprintln!("{} exit on None", thread::current().name().unwrap())}
+                if cfg.verbose > 1 { eprintln!("{} exit on None", thread::current().name().unwrap()) }
                 break;
             }
         };
@@ -474,8 +479,8 @@ fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>
                     }
                 }
 
-                if let Some(record) = re.captures_read(&mut cl,line.as_str()) {
-                    let cw = CapWrap {cl: &cl, text: line.as_str()};
+                if let Ok(record) = re.captures_read(&mut cl, line.as_bytes()) {
+                    let cw = CapWrap { cl: &cl, text: line.as_str() };
                     fieldcount += store_rec(&mut buff, &line, &cw, cw.len(), &mut map, &cfg, &mut rowcount);
                 } else {
                     _skipped += 1;
