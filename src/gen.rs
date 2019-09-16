@@ -41,7 +41,7 @@ fn sig_dig(v: f64, digits: usize) -> String {
 
 pub fn mem_metric_digit(v: usize, sig: usize) -> String {
     if v <= 0 || v > std::usize::MAX/2 {
-        format!("{:>width$}", "unknown", width=sig+3);
+        return format!("{:>width$}", "unknown", width=sig+3)
     }
 	let vt = mem_metric(v);
     format!("{:>width$} {}", sig_dig(vt.0, sig), vt.1, width=sig+1, )

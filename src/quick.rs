@@ -4,7 +4,12 @@ use pcre2::bytes::{Regex, Captures};
 use bstr::{BStr, ByteSlice};
 use std::str::from_utf8;
 
+mod gen;
+
 fn main() {
+    let v = 18446744073686483000usize;
+    println!("v: {}  metric: {}   cmp: {}", v, gen::mem_metric_digit(v, 4), std::usize::MAX/2);
+
     let s = "dog,cat,cow";
 //milk,bread,flour
 //1,2,3
