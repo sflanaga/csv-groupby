@@ -479,7 +479,7 @@ fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>
                     }
                 }
 
-                if let Ok(record) = re.captures_read(&mut cl, line.as_bytes()) {
+                if let Some(record) = re.captures_read(&mut cl, line.as_bytes())? {
                     let cw = CapWrap { cl: &cl, text: line.as_str() };
                     fieldcount += store_rec(&mut buff, &line, &cw, cw.len(), &mut map, &cfg, &mut rowcount);
                 } else {
