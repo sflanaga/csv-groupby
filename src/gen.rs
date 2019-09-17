@@ -49,7 +49,7 @@ pub fn mem_metric_digit(v: usize, sig: usize) -> String {
 
 #[test]
 fn test_mem_metric_digit() -> Result<(), Box<dyn std::error::Error>> {
-	for t in &[ (0,"    0 B "),
+	for t in &[ (0,"unknown"),
 		(1,     "    1 B "),
 		(5,     "    5 B "),
 		(1024,  "    1 KB"),

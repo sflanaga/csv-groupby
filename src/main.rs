@@ -36,11 +36,12 @@ use std::ops::Index;
 //pub static GLOBAL_TRACKER: System = System; //CounterAtomicUsize = CounterAtomicUsize;
 #[cfg(target_os = "linux")]
 #[global_allocator]
-pub static GLOBAL_TRACKER: jemallocator::Jemalloc = jemallocator::Jemalloc;
+pub static GLOBAL_TRACKER: CounterTlsToAtomicUsize = CounterTlsToAtomicUsize; 
+//pub static GLOBAL_TRACKER: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[cfg(target_os = "windows")]
 #[global_allocator]
-pub static GLOBAL_TRACKER: System = System;
+pub static GLOBAL_TRACKER: CounterTlsToAtomicUsize = CounterTlsToAtomicUsize; 
 
 
 #[derive(Debug)]
@@ -112,7 +113,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     if cfg.verbose >= 1 {
         eprintln!("Global allocator: {:#?}", GLOBAL_TRACKER);
     }
-    if pcre2::is_jit_available() { eprintln!("pcre2 JIT is available"); }
+    if cfg.verbose >= 1 && pcre2::is_jit_available() { eprintln!("pcre2 JIT is available"); }
 
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
