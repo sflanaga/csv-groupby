@@ -33,6 +33,8 @@ csv -k 0,1 -c ....
 
 TODO/ideas:  
 
+- add distribution to -u option where you have topN and bottomN displayed horizontally
+  (v1 x count1)(v2 x count2)... MIDCOUNT ...(vN-1 x countN-1)(vN-1 x countN-1)
 - Use stdin as a filelist source in addition to stdin as a data source
 - additional aggregate functions?:  avg, min, max, empty_count, number_count, zero_count
   - avg done
