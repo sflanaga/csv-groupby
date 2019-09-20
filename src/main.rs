@@ -737,8 +737,9 @@ where
                     brec.distinct[i].insert(record[index].as_ref().to_string(), 1);
                 } else {
                     let x = brec.distinct[i].get_mut(record[index].as_ref()).unwrap();
-                    *x = *x +1 ;
+                    *x = *x + 1;
                 }
+
             }
         }
     }
@@ -765,10 +766,10 @@ fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
             for j in 0..v.distinct.len() {
                 for (_ii, u) in v.distinct[j].iter().enumerate() {
                     if !v_new.distinct[j].contains_key(u.0) {
-                        v_new.distinct[j].insert(u.0.clone(), 1);
+                        v_new.distinct[j].insert(u.0.clone(), *u.1);
                     } else {
                         let x = v_new.distinct[j].get_mut(u.0).unwrap();
-                        *x = *x +1;
+                        *x = *x + *u.1;
                     }
                 }
             }
