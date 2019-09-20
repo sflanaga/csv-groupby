@@ -192,6 +192,7 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
                 cfg.sum_fields.iter_mut().for_each(|x| *x += 1);
                 cfg.avg_fields.iter_mut().for_each(|x| *x += 1);
                 cfg.unique_fields.iter_mut().for_each(|x| *x += 1);
+                cfg.write_distros.iter_mut().for_each(|x| *x += 1);
             } else {
                 eprintln!("Using full regex match as 0th field")
             }

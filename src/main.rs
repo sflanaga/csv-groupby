@@ -333,11 +333,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                         vcell.push(Cell::new(&format!("{}", &cc.distinct[i].len())));
                     }
                 }
-                for x in &cc.distinct {
-                    vcell.push(Cell::new(&format!("{}", x.len())));
-                }
-                let row = Row::new(vcell);
-                celltable.borrow_mut().add_row(row);
+               let row = Row::new(vcell);
+               celltable.borrow_mut().add_row(row);
             }
 
             celltable.borrow_mut().printstd();
@@ -391,8 +388,12 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 for x in &cc.avgs {
                     vcell.push(format!("{}", x.0 / (x.1 as f64)));
                 }
-                for x in &cc.distinct {
-                    vcell.push(format!("{}", x.len()));
+                for i in 0usize .. cc.distinct.len() {
+                    if cfg.write_distros.contains(&cfg.unique_fields[i] ) {
+                        vcell.push(format!("{}", distro_format(&cc.distinct[i], cfg.write_distros_upper, cfg.write_distros_bottom) ));
+                    } else {
+                        vcell.push(format!("{}", &cc.distinct[i].len()));
+                    }
                 }
                 println!("{}", vcell.join(&cfg.od));
             }
