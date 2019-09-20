@@ -4,6 +4,70 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::{fs, thread};
 use grep_cli::DecompressionReader;
+use std::collections::HashMap;
+
+pub fn distro_format<T>(map: &HashMap<T, usize>, upper: usize, bottom: usize) -> String
+	where T: std::fmt::Display + std::fmt::Debug + std::clone::Clone
+{
+	let mut vec: Vec<(usize, T)> = Vec::with_capacity(map.len());
+	for x in map.iter() {
+		vec.push((*x.1,x.0.clone()));
+	}
+	vec.sort_by(|x,y| y.0.cmp(&x.0));
+	let mut msg = String::with_capacity(16);
+	if upper+bottom >= vec.len() {
+		for i in 0..vec.len() {
+			msg.push_str(&format!("({} x {})", vec[i].1, vec[i].0));
+		}
+	} else {
+		for i in 0..upper {
+			msg.push_str(&format!("({} x {})", vec[i].1, vec[i].0));
+		}
+		msg.push_str(&format!("..{}..", vec.len() - (bottom+upper) ));
+		for i in vec.len()-bottom .. vec.len() {
+			msg.push_str(&format!("({} x {})", vec[i].1, vec[i].0));
+		}
+	}
+	msg
+}
+#[test]
+fn test_distro_format() {
+
+
+	let mut v: HashMap<String, usize> = HashMap::new();
+	v.insert("a".to_string(), 10 );
+	v.insert("z".to_string(), 111 );
+	v.insert("c".to_string(), 11 );
+	v.insert("q".to_string(), 5);
+
+	let result = "0 0 distro: ..4..
+0 1 distro: ..3..(q x 5)
+0 2 distro: ..2..(a x 10)(q x 5)
+0 3 distro: ..1..(c x 11)(a x 10)(q x 5)
+1 0 distro: (z x 111)..3..
+1 1 distro: (z x 111)..2..(q x 5)
+1 2 distro: (z x 111)..1..(a x 10)(q x 5)
+1 3 distro: (z x 111)(c x 11)(a x 10)(q x 5)
+2 0 distro: (z x 111)(c x 11)..2..
+2 1 distro: (z x 111)(c x 11)..1..(q x 5)
+2 2 distro: (z x 111)(c x 11)(a x 10)(q x 5)
+2 3 distro: (z x 111)(c x 11)(a x 10)(q x 5)
+3 0 distro: (z x 111)(c x 11)(a x 10)..1..
+3 1 distro: (z x 111)(c x 11)(a x 10)(q x 5)
+3 2 distro: (z x 111)(c x 11)(a x 10)(q x 5)
+3 3 distro: (z x 111)(c x 11)(a x 10)(q x 5)
+";
+
+	let mut res = String::new();
+	for u in 0..4 {
+		for b in 0..4 {
+			res.push_str(&format!("{} {} distro: {}\n",u,b, &distro_format(&v, u, b)));
+		}
+	}
+	assert_eq!(&res, result, "distro_format cmp failed");
+
+
+}
 
 fn mem_metric<'a>(v: usize) -> (f64,&'a str) {
 	const METRIC : [&str;8] = ["B ","KB","MB","GB","TB","PB","EB", "ZB"];

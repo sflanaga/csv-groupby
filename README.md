@@ -33,9 +33,7 @@ csv -k 0,1 -c ....
 
 TODO/ideas:  
 
-- add distribution to -u option where you have topN and bottomN displayed horizontally
-  (v1 x count1)(v2 x count2)... MIDCOUNT ...(vN-1 x countN-1)(vN-1 x countN-1)
-- Use stdin as a filelist source in addition to stdin as a data source
+ Use stdin as a filelist source in addition to stdin as a data source
 - additional aggregate functions?:  avg, min, max, empty_count, number_count, zero_count
   - avg done
 - do more work to multi-line re mode - not sure how it should really work yet
@@ -47,7 +45,9 @@ TODO/ideas:
 - use RE find/search for matches instead of line bound interface?
 - pcre2 weird failure - better handling really
 
-- DONE: Read from compressed files automatically - see grep-cli
+- DONE - add distribution to -u option where you have topN and bottomN displayed horizontally
+  (v1 x count1)(v2 x count2)... MIDCOUNT ...(vN-1 x countN-1)(vN-1 x countN-1)
+-- DONE: Read from compressed files automatically - see grep-cli
 - DONE - made 4x improvement on typical captures - pcre2 usage?  - ripgrep uses it - why?
 - Done - Optimize allocations in store_rec - avoid that ss.clone()
 - Done - Multithread io-swizzle to read more than one file at a time - good for many small files over nfs maybe

@@ -1,10 +1,15 @@
+#![allow(dead_code)]
+#![allow(unused_imports)]
+
 use crossbeam_channel::bounded;
 use std::thread;
 use pcre2::bytes::{Regex, Captures};
 use bstr::{BStr, ByteSlice};
 use std::str::from_utf8;
+use std::collections::HashMap;
 
-mod gen;
+pub mod gen;
+
 
 fn main() {
     let v = 18446744073686483000usize;

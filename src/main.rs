@@ -23,7 +23,7 @@ mod testre;
 mod mem;
 
 use cli::{get_cli, CliCfg};
-use gen::{io_thread_slicer, FileSlice, IoSlicerStatus, mem_metric_digit, per_file_thread};
+use gen::{io_thread_slicer, FileSlice, IoSlicerStatus, mem_metric_digit, per_file_thread, distro_format};
 use testre::testre;
 use glob::{MatchOptions, glob_with};
 use colored::Colorize;
@@ -31,6 +31,8 @@ use cpu_time::ProcessTime;
 
 use mem::{CounterTlsToAtomicUsize, GetAlloc, CounterAtomicUsize, CounterUsize};
 use std::ops::Index;
+use std::collections::HashMap;
+//use bstr::ByteSlice;
 
 //pub static GLOBAL_TRACKER: std::alloc::System = std::alloc::System;
 //pub static GLOBAL_TRACKER: System = System; //CounterAtomicUsize = CounterAtomicUsize;
@@ -49,7 +51,7 @@ struct KeySum {
     count: u64,
     sums: Vec<f64>,
     avgs: Vec<(f64, usize)>,
-    distinct: Vec<HashSet<String>>,
+    distinct: Vec<HashMap<String, usize>>,
 }
 
 impl KeySum {
@@ -61,7 +63,7 @@ impl KeySum {
             distinct: {
                 let mut v = Vec::with_capacity(dist_len);
                 for _ in 0..dist_len {
-                    v.push(HashSet::new());
+                    v.push(HashMap::new());
                 }
                 v
             },
@@ -268,6 +270,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if do_ticker { eprintln!(); } // write extra line at the end of stderr in case the ticker munges things
+
+    let startout = Instant::now();
+
     if !cfg.no_output {
         if !cfg.csv_output {
             let celltable = std::cell::RefCell::new(Table::new());
@@ -319,6 +324,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                         vcell.push(Cell::new("unknown"));
                     } else {
                         vcell.push(Cell::new(&format!("{}", (x.0 / (x.1 as f64)))));
+                    }
+                }
+                for i in 0usize .. cc.distinct.len() {
+                    if cfg.write_distros.contains(&cfg.unique_fields[i] ) {
+                        vcell.push(Cell::new(&format!("{}", distro_format(&cc.distinct[i], cfg.write_distros_upper, cfg.write_distros_bottom) )));
+                    } else {
+                        vcell.push(Cell::new(&format!("{}", &cc.distinct[i].len())));
                     }
                 }
                 for x in &cc.distinct {
@@ -386,7 +398,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     }
-
+    let endout = Instant::now();
+    let outdur = endout - startout;
+    if cfg.verbose > 0 { eprintln!("output composition/write time: {:.3}", outdur.as_millis() as f64 / 1000.0); }
     if cfg.verbose >= 1 || cfg.stats {
         let elapsed = start_f.elapsed();
         let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
@@ -480,7 +494,7 @@ fn _worker_re(cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>
                     }
                 }
 
-                if let Some(record) = re.captures_read(&mut cl, line.as_bytes())? {
+                if let Some(_record) = re.captures_read(&mut cl, line.as_bytes())? {
                     let cw = CapWrap { cl: &cl, text: line.as_str() };
                     fieldcount += store_rec(&mut buff, &line, &cw, cw.len(), &mut map, &cfg, &mut rowcount);
                 } else {
@@ -718,8 +732,11 @@ where
         for i in 0 .. cfg.unique_fields.len() {
             let index = cfg.unique_fields[i];
             if index < rec_len {
-                if !brec.distinct[i].contains(record[index].as_ref()) {
-                    brec.distinct[i].insert(record[index].as_ref().to_string());
+                if !brec.distinct[i].contains_key(record[index].as_ref()) {
+                    brec.distinct[i].insert(record[index].as_ref().to_string(), 1);
+                } else {
+                    let x = brec.distinct[i].get_mut(record[index].as_ref()).unwrap();
+                    *x = *x +1 ;
                 }
             }
         }
@@ -746,7 +763,12 @@ fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
 
             for j in 0..v.distinct.len() {
                 for (_ii, u) in v.distinct[j].iter().enumerate() {
-                    v_new.distinct[j].insert(u.to_string());
+                    if !v_new.distinct[j].contains_key(u.0) {
+                        v_new.distinct[j].insert(u.0.clone(), 1);
+                    } else {
+                        let x = v_new.distinct[j].get_mut(u.0).unwrap();
+                        *x = *x +1;
+                    }
                 }
             }
         }
@@ -754,7 +776,7 @@ fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
     let end = Instant::now();
     let dur = end - start;
     if verbose > 0 {
-        println!("re thread merge maps time: {:?}", dur);
+        println!("re thread merge maps time: {:.3}s", dur.as_millis() as f64 / 1000.0f64);
     }
 }
 

@@ -54,6 +54,18 @@ pub struct CliCfg {
     /// Fields to count distinct - base index 0
     pub unique_fields: Vec<usize>,
 
+    #[structopt(long = "write_distros", name = "writedistros", use_delimiter(true))]
+    /// for certain unique_value fields, write a partial distribution of value x count from highest to lowers
+    pub write_distros: Vec<usize>,
+
+    #[structopt(long = "write_distros_upper", name = "writedistrosupper", use_delimiter(true), default_value="5")]
+    /// number of distros to write with the highest counts
+    pub write_distros_upper: usize,
+
+    #[structopt(long = "write_distros_bottom", name = "writedistrobottom", use_delimiter(true), default_value="2")]
+    /// number of distros to write with the lowest counts
+    pub write_distros_bottom: usize,
+
     #[structopt(short = "s", long = "sum_values", name = "sumfield", use_delimiter(true))]
     /// Field to sum as float64s - base index 0
     pub sum_fields: Vec<usize>,
@@ -192,6 +204,18 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
                 Err(err) => Err(err)?,
                 _ => {}
             };
+
+        }
+        {
+            if cfg.write_distros.len() > cfg.unique_fields.len() {
+                Err("write_distro fields must be subsets of -u [unique fields]")?
+            }
+
+            for x in &cfg.write_distros {
+                if !cfg.unique_fields.contains(&x) {
+                    Err(format!("write_distro specifies field {} that is not a subset of the unique_keys", &x))?
+                }
+            }
         }
         if cfg.verbose >= 2 {
             eprintln!("{:#?}", cfg);

@@ -53,8 +53,8 @@ pub fn testre(c: &CliCfg) -> Result<(), Box<dyn std::error::Error>> {
 
 fn teststr(re: &Regex, l: &str, sre: &str, verbose: usize) -> Result<(), Box<dyn std::error::Error>> {
     let mut inner_caps = re.capture_locations();
-    if let Some(record) = re.captures_read(&mut inner_caps, l.as_bytes())? {
-        let mut caps = CapWrap{ cl:&mut inner_caps, text: l };
+    if let Some(_record) = re.captures_read(&mut inner_caps, l.as_bytes())? {
+        let caps = CapWrap{ cl:&mut inner_caps, text: l };
         println!("RE: \"{}\"\nline: \"{}\"", sre, l);
         if verbose > 0 { eprintln!("DBG: record: {:#?}", caps); }
         for i in 0..caps.len() {
