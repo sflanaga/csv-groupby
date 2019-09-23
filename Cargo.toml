@@ -34,6 +34,9 @@ path = "src/test.rs"
 name = "quick"
 path = "src/quick.rs"
 
+[[bin]]
+name = "append"
+path = "src/append.rs"
 
 [target.'cfg(target_os = "linux")'.dependencies]
 jemallocator = "0.3.2"

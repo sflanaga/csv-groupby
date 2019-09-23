@@ -3,7 +3,8 @@
 
 use crossbeam_channel::bounded;
 use std::thread;
-use pcre2::bytes::{Regex, Captures};
+use regex::{RegexBuilder,Regex,Captures};
+//use pcre2::bytes::{Regex, Captures, RegexBuilder};
 use bstr::{BStr, ByteSlice};
 use std::str::from_utf8;
 use std::collections::HashMap;
@@ -12,20 +13,22 @@ pub mod gen;
 
 
 fn main() {
-    let v = 18446744073686483000usize;
-    println!("v: {}  metric: {}   cmp: {}", v, gen::mem_metric_digit(v, 4), std::usize::MAX/2);
+//    let v = 18446744073686483000usize;
+//    println!("v: {}  metric: {}   cmp: {}", v, gen::mem_metric_digit(v, 4), std::usize::MAX/2);
 
-    let s = "dog,cat,cow";
-//milk,bread,flour
-//1,2,3
-//";
-
-    let re = Regex::new("^[^,]+,([^,]+),[^,]+$").unwrap();
-    let caps = re.captures(s.as_bytes()).unwrap().expect("should match");
-    for i in 0 .. caps.len() {
-        //println!("{}", from_utf8(caps.get(i).unwrap().as_bytes()).unwrap());
-        println!("{}",caps.get(i).unwrap().as_bytes().to_str_lossy());
+    let s = "dog,cat,cow;
+milk,bread,flour
+1,2,3
+";
+    let mut c = 0;
+    let res = RegexBuilder::new(r#"(?m)cat.*^.*bread"#).multi_line(true).build().unwrap();
+    //let re = Regex::new("^[^,]+,([^,]+),[^,]+$").unwrap();
+    for caps in res.captures_iter(s) {
+        println!("{:#?}", &caps);
+        c += 1;
     }
+    println!("ran {} matches", c);
+
 
 
 }
