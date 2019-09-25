@@ -207,8 +207,10 @@ pub struct FileSlice {
 }
 
 pub fn io_thread_slicer (
+	recv_blocks: &crossbeam_channel::Receiver<Vec<u8>>,
 	currfilename: &dyn Display,
 	block_size: usize,
+	recycle_io_blocks: bool,
 	verbosity: usize,
 	handle: &mut dyn Read,
 	status: &mut Arc<IoSlicerStatus>,
@@ -233,7 +235,11 @@ pub fn io_thread_slicer (
 	let mut last_left_len;
 	let mut curr_pos = 0usize;
 	loop {
-		let mut block = vec![0u8; block_size];
+		let mut block = if recycle_io_blocks {
+			recv_blocks.recv()?
+		} else {
+			vec![0u8;block_size]
+		};
 		if left_len > 0 {
 			block[0..left_len].copy_from_slice(&holdover[0..left_len]);
 		}
@@ -322,7 +328,7 @@ pub fn io_thread_slicer (
 	Ok((block_count, bytes))
 }
 
-pub fn per_file_thread(recv_pathbuff: &crossbeam_channel::Receiver<Option<PathBuf>>,
+pub fn per_file_thread(	recycle_io_blocks: bool, recv_blocks: &crossbeam_channel::Receiver<Vec<u8>>, recv_pathbuff: &crossbeam_channel::Receiver<Option<PathBuf>>,
 					   send_fileslice: &crossbeam_channel::Sender<Option<FileSlice>>,
 					   block_size: usize, verbosity: usize, mut io_status: Arc<IoSlicerStatus>) -> (usize,usize) {
 	let mut block_count = 0usize;
@@ -356,7 +362,8 @@ pub fn per_file_thread(recv_pathbuff: &crossbeam_channel::Receiver<Option<PathBu
 				continue;
 			}
 		};
-		match io_thread_slicer(&filename.display(), block_size, verbosity, &mut rdr, &mut io_status, &send_fileslice) {
+		match io_thread_slicer(&recv_blocks, &filename.display(), block_size, recycle_io_blocks,
+							   verbosity, &mut rdr, &mut io_status, &send_fileslice) {
 			Ok((bc, by)) => { block_count += bc; bytes += by; },
 			Err(err) => eprintln!("error io slicing {}, error: {}", &filename.display(), err),
 		}
