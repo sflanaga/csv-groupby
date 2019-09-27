@@ -116,13 +116,18 @@ fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>
     }
     eprint!("                                                                             \r");
 }
+fn type_name_of<T: core::any::Any>(t: &T) -> &str {
+    return std::any::type_name::<T>();
+}
+
 
 fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let cfg = get_cli()?;
 
     if cfg.verbose >= 1 {
-        eprintln!("Global allocator: {:#?}", GLOBAL_TRACKER);
+        eprintln!("Global allocator / tracker: {}", type_name_of(&GLOBAL_TRACKER));
     }
+
     if cfg.verbose >= 1 && pcre2::is_jit_available() {
         eprintln!("pcre2 JIT is available");
     }
@@ -139,6 +144,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
     let mut main_map = MyMap::new();
+    if cfg.verbose >= 1 {
+	eprintln!("map type: {}", type_name_of(&main_map));
+    }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -519,6 +527,8 @@ fn _worker_re(
     let mut fieldcount = 0;
     let mut rowcount = 0;
     let mut _skipped = 0;
+    let mut cl = re.capture_locations();
+
     loop {
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
@@ -529,7 +539,6 @@ fn _worker_re(
                 break;
             }
         };
-        let mut cl = re.capture_locations();
         if !cfg.noop_proc {
             for line in fc.block[0..fc.len].lines() {
                 let line = line?;
@@ -635,12 +644,16 @@ fn _worker_multi_re(
     cfg: &CliCfg,
     recv: &crossbeam_channel::Receiver<Option<FileSlice>>,
 ) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
-    // return lines / fields
     let mut map = MyMap::new();
 
     let mut re_es = vec![];
     for r in &cfg.re_str {
-        re_es.push(Regex::new(&r)?); // .expect(format!("Cannot parse regular expression {}, error = {}", r, err)));
+        let re = match Regex_pre2::new(r) {
+            Err(err) => panic!("Cannot parse regular expression {}, error = {}", r, err),
+            Ok(r) => r,
+        };
+     
+        re_es.push(re);
     }
 
     let mut buff = String::with_capacity(256); // dyn buffer
@@ -651,6 +664,7 @@ fn _worker_multi_re(
     let mut acc_record: Vec<String> = vec![];
 
     acc_record.push(String::new()); // push 1st blank whole match
+    let mut cl = re_es[0].capture_locations();
 
     loop {
         let mut acc_idx = 1usize;
@@ -677,9 +691,11 @@ fn _worker_multi_re(
                 let line = line?;
 
                 let re = &re_es[re_curr_idx];
-                if let Some(record) = re.captures(line.as_str()) {
-                    for f in record.iter().skip(1) {
-                        let f = f.unwrap().as_str();
+                if let Some(record) = re.captures_read(&mut cl, line.as_bytes())? {
+                    let cw = CapWrap { cl: &cl, text: line.as_str() };
+
+                    for i in 1 .. cw.len() {
+                        let f = &cw[i];
                         grow_str_vec_or_add(acc_idx, &mut acc_record, f);
                         acc_idx += 1;
                         if cfg.verbose > 2 {
