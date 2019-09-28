@@ -18,7 +18,7 @@ fn get_default_thread_no() -> usize {
 }
 
 fn get_default_queue_size() -> usize {
-    get_default_thread_no() * 2
+    get_default_thread_no() * 4
 }
 
 lazy_static! {
@@ -133,7 +133,7 @@ pub struct CliCfg {
     /// do no real work - used for testing IO
     pub noop_proc: bool,
 
-    #[structopt(long = "block_size_k", default_value = "64")]
+    #[structopt(long = "block_size_k", default_value = "256")]
     /// Size of the IO block "K" (1024 bytes) used between reading thread and parser threads
     pub block_size_k: usize,
 

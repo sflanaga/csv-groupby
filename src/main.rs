@@ -122,6 +122,9 @@ fn type_name_of<T: core::any::Any>(t: &T) -> &str {
 
 
 fn csv() -> Result<(), Box<dyn std::error::Error>> {
+    let start_f = Instant::now();
+    let startcpu = ProcessTime::now();
+
     let cfg = get_cli()?;
 
     if cfg.verbose >= 1 {
@@ -136,8 +139,6 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_fieldcount = 0usize;
     let mut total_blocks = 0usize;
     let mut total_bytes = 0usize;
-    let start_f = Instant::now();
-    let startcpu = ProcessTime::now();
 
     if cfg.testre.is_some() {
         testre(&cfg)?;
@@ -352,14 +353,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
             for (ff, cc) in &main_map {
                 let mut vcell = vec![];
-                let z1: Vec<&str> = ff.split('|').collect();
-                for x in &z1 {
+                ff.split('|').for_each(|x| {
                     if x.len() <= 0 {
                         vcell.push(Cell::new(&cfg.empty));
                     } else {
-                        vcell.push(Cell::new(&x.to_string()));
+                        vcell.push(Cell::new(&x));
                     }
-                }
+                });
 
                 if !cfg.no_record_count {
                     vcell.push(Cell::new(&format!("{}", cc.count)));
@@ -415,17 +415,15 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 thekeys.push(k.clone());
             }
             thekeys.sort_unstable();
-            // tain(|ff,cc| {
             for ff in thekeys.iter() {
                 let mut vcell = vec![];
-                let z1: Vec<String> = ff.split('|').map(|x| x.to_string()).collect();
-                for x in &z1 {
+                ff.split('|').for_each(|x| {
                     if x.len() <= 0 {
                         vcell.push(format!("{}", cfg.empty));
                     } else {
-                        vcell.push(format!("{}", x));
+                        vcell.push(x.to_string());
                     }
-                }
+                });
                 let cc = main_map.get(ff).unwrap();
                 if !cfg.no_record_count {
                     vcell.push(format!("{}", cc.count));
@@ -631,8 +629,11 @@ fn worker_multi_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCf
     }
 }
 
-fn grow_str_vec_or_add(idx: usize, v: &mut Vec<String>, s: &str) {
+fn grow_str_vec_or_add(idx: usize, v: &mut Vec<String>, s: &str, line: &str, linecount: usize, i:usize, verbose: usize) {
     if idx < v.len() {
+        if verbose > 1 && v[idx].len() > 0 {
+            eprintln!("idx: {} pushing more: {} to existing: {}  line: {} : {}  match# {}", idx, s, v[idx], line, linecount, i);
+        }
         v[idx].push_str(s);
     } else {
         v.push(String::from(s));
@@ -647,6 +648,7 @@ fn _worker_multi_re(
     let mut map = MyMap::new();
 
     let mut re_es = vec![];
+    //let mut cls = vec![];
     for r in &cfg.re_str {
         let re = match Regex_pre2::new(r) {
             Err(err) => panic!("Cannot parse regular expression {}, error = {}", r, err),
@@ -654,11 +656,13 @@ fn _worker_multi_re(
         };
      
         re_es.push(re);
+        //cls.push(re.capture_locations());
     }
 
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
     let mut rowcount = 0;
+    let mut linecount = 0;
     let mut _skipped = 0;
     let mut re_curr_idx = 0;
     let mut acc_record: Vec<String> = vec![];
@@ -666,8 +670,8 @@ fn _worker_multi_re(
     acc_record.push(String::new()); // push 1st blank whole match
     let mut cl = re_es[0].capture_locations();
 
+    let mut acc_idx = 1usize;
     loop {
-        let mut acc_idx = 1usize;
 
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
@@ -685,19 +689,19 @@ fn _worker_multi_re(
             }
             acc_idx = 1;
         } // start new file - start at first RE
+        if cfg.verbose > 1 { eprintln!("file slice index: filename: {} index: {} len: {}", fc.filename, fc.index, fc.len); }
 
         if !cfg.noop_proc {
             for line in fc.block[0..fc.len].lines() {
                 let line = line?;
-
+                linecount += 1;
                 let re = &re_es[re_curr_idx];
                 if let Some(record) = re.captures_read(&mut cl, line.as_bytes())? {
                     let cw = CapWrap { cl: &cl, text: line.as_str() };
-
                     for i in 1 .. cw.len() {
                         let f = &cw[i];
-                        grow_str_vec_or_add(acc_idx, &mut acc_record, f);
                         acc_idx += 1;
+                        grow_str_vec_or_add(acc_idx, &mut acc_record, f, &line, linecount, i, cfg.verbose);
                         if cfg.verbose > 2 {
                             eprintln!("mRE MATCHED: {}  REC: {:?}", line, acc_record);
                         }
@@ -706,13 +710,14 @@ fn _worker_multi_re(
                     if re_curr_idx >= re_es.len() {
                         fieldcount += store_rec(&mut buff, &line, &acc_record, acc_record.len(), &mut map, &cfg, &mut rowcount);
                         if cfg.verbose > 2 {
-                            eprintln!("mRE STORE {}", line);
+                            eprintln!("mRE STORE {:?} on line: {}", acc_record, line);
                         }
                         re_curr_idx = 0;
+                        acc_record.iter_mut().for_each(move |s| s.clear());
                         for s in &mut acc_record {
                             s.clear();
                         }
-                        acc_idx = 1;
+                        acc_idx = 0;
                     }
                 } else {
                     _skipped += 1;

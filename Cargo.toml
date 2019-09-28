@@ -12,7 +12,8 @@ panic = 'abort'
 [profile.release]
 debug = false 
 debug-assertions = false
-lto = true
+# lto does help but not by much with pcre2
+#lto = true
 codegen-units=1
 opt-level = 3
 panic = 'abort'  # does cleanup upon panics

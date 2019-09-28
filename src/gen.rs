@@ -7,13 +7,22 @@ use grep_cli::DecompressionReader;
 use std::collections::HashMap;
 
 pub fn distro_format<T>(map: &HashMap<T, usize>, upper: usize, bottom: usize) -> String
-	where T: std::fmt::Display + std::fmt::Debug + std::clone::Clone
+	where T: std::fmt::Display + std::fmt::Debug + std::clone::Clone + Ord
 {
 	let mut vec: Vec<(usize, T)> = Vec::with_capacity(map.len());
 	for x in map.iter() {
 		vec.push((*x.1,x.0.clone()));
 	}
-	vec.sort_by(|x,y| y.0.cmp(&x.0));
+	vec.sort_by(|x,y| {
+		let ev = y.0.cmp(&x.0);
+		// we do the extra ordering here to get predictable results
+		// for testing and for user sanity
+		if ev == core::cmp::Ordering::Equal {
+			y.1.cmp(&y.1)
+		} else {
+			ev
+		}});
+
 	let mut msg = String::with_capacity(16);
 	if upper+bottom >= vec.len() {
 		for i in 0..vec.len() {
