@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use regex::Regex;
+use pcre2::bytes::Regex;
 
-use structopt::StructOpt;
 use lazy_static::lazy_static;
+use structopt::StructOpt;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -46,32 +46,32 @@ pub struct CliCfg {
     /// Line(s) of text to test - best surrounded by quotes
     pub testlines: Vec<String>,
 
-    #[structopt(short = "k", long = "key_fields", name = "keyfield", use_delimiter(true), conflicts_with = "testre")]
-    /// Fields that will act as group by keys - base index 0
+    #[structopt(short = "k", long = "key_fields", name = "keyfield", use_delimiter(true), conflicts_with = "testre", )]
+    /// Fields that will act as group by keys - base index 1
     pub key_fields: Vec<usize>,
 
     #[structopt(short = "u", long = "unique_values", name = "uniquefield", use_delimiter(true))]
-    /// Fields to count distinct - base index 0
+    /// Fields to count distinct - base index 1
     pub unique_fields: Vec<usize>,
 
     #[structopt(long = "write_distros", name = "writedistros", use_delimiter(true))]
     /// for certain unique_value fields, write a partial distribution of value x count from highest to lowers
     pub write_distros: Vec<usize>,
 
-    #[structopt(long = "write_distros_upper", name = "writedistrosupper", use_delimiter(true), default_value="5")]
+    #[structopt(long = "write_distros_upper", name = "writedistrosupper", use_delimiter(true), default_value = "5")]
     /// number of distros to write with the highest counts
     pub write_distros_upper: usize,
 
-    #[structopt(long = "write_distros_bottom", name = "writedistrobottom", use_delimiter(true), default_value="2")]
+    #[structopt(long = "write_distros_bottom", name = "writedistrobottom", use_delimiter(true), default_value = "2")]
     /// number of distros to write with the lowest counts
     pub write_distros_bottom: usize,
 
     #[structopt(short = "s", long = "sum_values", name = "sumfield", use_delimiter(true))]
-    /// Field to sum as float64s - base index 0
+    /// Field to sum as float64s - base index 1
     pub sum_fields: Vec<usize>,
 
     #[structopt(short = "a", long = "avg_values", name = "avgfield", use_delimiter(true))]
-    /// Field to average if parseable number values found - base index 0
+    /// Field to average if parseable number values found - base index 1
     pub avg_fields: Vec<usize>,
 
     #[structopt(short = "r", long = "regex", conflicts_with = "delimiter")]
@@ -87,14 +87,20 @@ pub struct CliCfg {
     /// RE to match again.
     pub re_str: Vec<String>,
 
+    #[structopt(short = "C", short = "p", long = "path_re")]
+    /// Parse the path of the file to and process only those that match.
+    /// If the matches have sub groups, then use those strings as parts to summarized.
+    /// This works in CSV mode as well as Regex mode, but not while parsing STDIO
+    pub re_path: Option<String>,
+
     #[structopt(short = "C", long = "re_line_contains")]
     /// Gives a hint to regex mode to presearch a line before testing regex.
     /// This may speed up regex mode significantly if the lines you match on are a minority to the whole.
     pub re_line_contains: Option<String>,
 
-    #[structopt(long = "fullmatch_as_field")]
-    /// Using whole regex match as 0th field - adds 1 to all others
-    pub fullmatch_as_field: bool,
+//    #[structopt(long = "fullmatch_as_field")]
+//    /// Using whole regex match as 0th field - adds 1 to all others
+//    pub fullmatch_as_field: bool,
 
     #[structopt(short = "d", long = "input_delimiter", name = "delimiter", default_value = ",")]
     /// Delimiter if in csv mode
@@ -146,9 +152,9 @@ pub struct CliCfg {
     /// list of input files, defaults to stdin
     pub files: Vec<PathBuf>,
 
-    #[structopt(short = "g", long = "glob", name = "glob", conflicts_with = "file")]
-    /// glob search files - even recursively - see "man 7 glob"
-    pub glob: Option<String>,
+    #[structopt(short = "w", long = "walk", name = "walk", conflicts_with = "file")]
+    /// recursively walk a tree of files to parse
+    pub walk: Option<String>,
 
     #[structopt(long = "stats")]
     /// list of input files, defaults to stdin
@@ -190,17 +196,28 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
                 eprintln!("Override thread number to 1 since you have multiple [{}] REs listed ", cfg.re_str.len());
             }
         }
-        if cfg.re_str.len() > 0 {
-            if !cfg.fullmatch_as_field {
-                cfg.key_fields.iter_mut().for_each(|x| *x += 1);
-                cfg.sum_fields.iter_mut().for_each(|x| *x += 1);
-                cfg.avg_fields.iter_mut().for_each(|x| *x += 1);
-                cfg.unique_fields.iter_mut().for_each(|x| *x += 1);
-                cfg.write_distros.iter_mut().for_each(|x| *x += 1);
-            } else {
-                eprintln!("Using full regex match as 0th field")
-            }
+        fn re_map(v: usize) -> usize {
+            if v <= 0 { panic!("Field indices must start at base 1"); }
+            v-1
         }
+        cfg.key_fields.iter_mut().for_each(|x| *x = re_map(*x));
+        cfg.sum_fields.iter_mut().for_each(|x| *x = re_map(*x));
+        cfg.avg_fields.iter_mut().for_each(|x| *x = re_map(*x));
+        cfg.unique_fields.iter_mut().for_each(|x| *x = re_map(*x));
+        cfg.write_distros.iter_mut().for_each(|x| *x = re_map(*x));
+
+
+//        if cfg.re_str.len() > 0 {
+//            if !cfg.fullmatch_as_field {
+//                cfg.key_fields.iter_mut().for_each(|x| *x += 1);
+//                cfg.sum_fields.iter_mut().for_each(|x| *x += 1);
+//                cfg.avg_fields.iter_mut().for_each(|x| *x += 1);
+//                cfg.unique_fields.iter_mut().for_each(|x| *x += 1);
+//                cfg.write_distros.iter_mut().for_each(|x| *x += 1);
+//            } else {
+//                eprintln!("Using full regex match as 0th field")
+//            }
+//        }
         if cfg.re_line_contains.is_some() && cfg.re_str.len() <= 0 {
             Err("re_line_contains requires -r regex option to be used")?;
         }
@@ -209,7 +226,6 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
                 Err(err) => Err(err)?,
                 _ => {}
             };
-
         }
         {
             if cfg.write_distros.len() > cfg.unique_fields.len() {
@@ -227,6 +243,12 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
         }
         if cfg.testre.is_none() && cfg.key_fields.len() <= 0 && cfg.sum_fields.len() <= 0 && cfg.avg_fields.len() <= 0 && cfg.unique_fields.len() <= 0 {
             Err("No work to do! - you should specify at least one or more field options or a testre")?;
+        }
+        if cfg.re_path.is_some() {
+            if cfg.files.len() <= 0 && cfg.walk.is_none() {
+                Err("Cannot use a re_path setting with STDIN as input")?;
+            }
+            let _ = Regex::new(&cfg.re_path.as_ref().unwrap())?;
         }
 
         cfg

@@ -29,12 +29,14 @@ use cli::{get_cli, CliCfg};
 use colored::Colorize;
 use cpu_time::ProcessTime;
 use gen::{distro_format, io_thread_slicer, mem_metric_digit, per_file_thread, FileSlice, IoSlicerStatus};
-use glob::{glob_with, MatchOptions};
+use ignore::WalkBuilder;
 use testre::testre;
 
 use mem::{CounterAtomicUsize, CounterTlsToAtomicUsize, CounterUsize, GetAlloc};
 use std::collections::HashMap;
 use std::ops::Index;
+use csv::StringRecord;
+
 //use bstr::ByteSlice;
 
 //pub static GLOBAL_TRACKER: std::alloc::System = std::alloc::System;
@@ -116,10 +118,9 @@ fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>
     }
     eprint!("                                                                             \r");
 }
-fn type_name_of<T: core::any::Any>(t: &T) -> &str {
+fn type_name_of<T: core::any::Any>(_t: &T) -> &str {
     return std::any::type_name::<T>();
 }
-
 
 fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let start_f = Instant::now();
@@ -146,7 +147,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut main_map = MyMap::new();
     if cfg.verbose >= 1 {
-	eprintln!("map type: {}", type_name_of(&main_map));
+        eprintln!("map type: {}", type_name_of(&main_map));
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -155,7 +156,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let (send_fileslice, recv_fileslice): (crossbeam_channel::Sender<Option<FileSlice>>, crossbeam_channel::Receiver<Option<FileSlice>>) =
         crossbeam_channel::bounded(cfg.thread_qsize);
 
-    let do_stdin = cfg.files.len() <= 0 && cfg.glob.is_none();
+    let do_stdin = cfg.files.len() <= 0 && cfg.walk.is_none();
     let mut io_status = Arc::new(IoSlicerStatus::new());
     let block_size = match cfg.block_size_b {
         0 => cfg.block_size_k * 1024,
@@ -198,14 +199,26 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let mut io_handler = vec![];
     let (send_pathbuff, recv_pathbuff): (crossbeam_channel::Sender<Option<PathBuf>>, crossbeam_channel::Receiver<Option<PathBuf>>) = crossbeam_channel::bounded(cfg.thread_qsize);
     for no_threads in 0..cfg.no_threads {
-        let cfg = cfg.clone();
+        let clone_cfg = cfg.clone();
         let clone_recv_pathbuff = recv_pathbuff.clone();
         let clone_send_fileslice = send_fileslice.clone();
         let clone_recv_blocks = recv_blocks.clone();
         let io_status_cloned = io_status.clone();
+        let path_re:Option<Regex_pre2> = clone_cfg.re_path.as_ref().map_or(None, |x| Some(Regex_pre2::new(&x).unwrap()));
         let h = thread::Builder::new()
             .name(format!("worker_io{}", no_threads))
-            .spawn(move || per_file_thread(cfg.recycle_io_blocks,&clone_recv_blocks, &clone_recv_pathbuff, &clone_send_fileslice, block_size, cfg.verbose, io_status_cloned))
+            .spawn(move || {
+                per_file_thread(
+                    clone_cfg.recycle_io_blocks,
+                    &clone_recv_blocks,
+                    &clone_recv_pathbuff,
+                    &clone_send_fileslice,
+                    block_size,
+                    clone_cfg.verbose,
+                    io_status_cloned,
+                    &path_re,
+                )
+            })
             .unwrap();
         io_handler.push(h);
     }
@@ -234,8 +247,19 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("{}", "<<< reading from stdin".red());
         let stdin = std::io::stdin();
         let mut handle = stdin; // .lock();
+        let empty_vec: Vec<String> = Vec::new();
 
-        let (blocks, bytes) = io_thread_slicer(&recv_blocks, &"STDIO".to_string(), block_size, cfg.recycle_io_blocks, cfg.verbose, &mut handle, &mut io_status, &send_fileslice)?;
+        let (blocks, bytes) = io_thread_slicer(
+            &recv_blocks,
+            &"STDIO".to_string(),
+            &empty_vec,
+            block_size,
+            cfg.recycle_io_blocks,
+            cfg.verbose,
+            &mut handle,
+            &mut io_status,
+            &send_fileslice,
+        )?;
         total_bytes += bytes;
         total_blocks += blocks;
     } else if cfg.files.len() > 0 {
@@ -245,28 +269,22 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 .send(Some(path.clone()))
                 .expect(&format!("Unable to send path: {} to path queue", path.display()));
         }
-    } else {
-        let options = MatchOptions {
-            case_sensitive: true,
-            require_literal_separator: false,
-            require_literal_leading_dot: false,
-        };
-        // io and worker threads are started so this should kick off stuff
-        // at first file... but not sure glob works that way - it may collect
-        // internally first - not sure
-        for entry in glob_with(
-            &(cfg.glob.as_ref().expect(&format!("glob unparseable or non existent: {}", cfg.glob.as_ref().unwrap()))),
-            options,
-        )
-        .unwrap()
-        {
-            if let Ok(path) = entry {
-                send_pathbuff
-                    .send(Some(path.clone()))
-                    .expect(&format!("Unable to send path: {} to path queue", path.display()));
+    } else if cfg.walk.is_some() {
+        let root = PathBuf::from(cfg.walk.as_ref().unwrap());
+        for result in WalkBuilder::new(root).hidden(false).build() {
+            match result {
+                Ok(p) =>
+                    send_pathbuff
+                        .send(Some(p.clone().into_path()))
+                        .expect(&format!("Unable to send path: {} to path queue", p.into_path().display())),
+                Err(err) => eprintln!("Error: {}", err),
             }
         }
+    } else {
+        eprintln!("NOT sure where files are coming from...");
+        std::process::exit(1);
     }
+
     if cfg.verbose > 1 {
         eprintln!("sending stops to thread");
     }
@@ -306,15 +324,11 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     //
 
     // restore indexes to users input - really just makes testing slightly easier
-    fn re_mod_idx<T>(cfg: &CliCfg, v: T) -> T
+    fn re_mod_idx<T>(_cfg: &CliCfg, v: T) -> T
     where
         T: std::ops::Sub<Output = T> + From<usize>,
     {
-        if !cfg.fullmatch_as_field && cfg.re_str.len() > 0 {
-            v - 1.into()
-        } else {
             v
-        }
     }
     if do_ticker {
         eprintln!();
@@ -550,8 +564,18 @@ fn _worker_re(
                 }
 
                 if let Some(_record) = re.captures_read(&mut cl, line.as_bytes())? {
-                    let cw = CapWrap { cl: &cl, text: line.as_str() };
-                    fieldcount += store_rec(&mut buff, &line, &cw, cw.len(), &mut map, &cfg, &mut rowcount);
+                    let mut v: Vec<&str> = Vec::with_capacity(cl.len()+fc.sub_grps.len());
+                    for x in fc.sub_grps.iter() {
+                        v.push(x);
+                    }
+                    for i in 1 .. cl.len() {
+                        let r = cl.get(i).unwrap();
+                        v.push(&line[r.0 .. r.1]);
+                    }
+                    if cfg.verbose > 2 { eprintln!("DBG RE WITH FILE PASTS VEC: {:?}", v);}
+
+
+                    fieldcount += store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
                 } else {
                     _skipped += 1;
                 }
@@ -600,15 +624,25 @@ fn _worker_csv(
                 break;
             }
         };
+        let add_subs = fc.sub_grps.len() > 0;
+
         if !cfg.noop_proc {
             let mut recrdr = builder.from_reader(&fc.block[0..fc.len]);
-            for record in recrdr.records() {
-                let record = record?;
-                // let record = match record {
-                //     Ok(record) => record,
-                //     Err(err) => {eprintln!("error pulling csv record: {}", err); continue;}
-                // };
-                fieldcount += store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+            if add_subs {
+                for record in recrdr.records() {
+                    let record = record?;
+                    let mut v: Vec<&str> = Vec::with_capacity(record.len() + fc.sub_grps.len());
+                    fc.sub_grps.iter().map(|x| x.as_str()).chain(record.iter())
+                      .for_each(|x| v.push(x)); //
+                    if cfg.verbose > 2 { eprintln!("DBG WITH FILE PASTS VEC: {:?}", v);}
+                    fieldcount += store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
+                    v.clear();
+                }
+            } else {
+                for record in recrdr.records() {
+                    let record = record?;
+                    fieldcount += store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+                }
             }
         }
         if cfg.recycle_io_blocks {
@@ -628,8 +662,16 @@ fn worker_multi_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCf
         }
     }
 }
+fn reused_str_vec(idx: usize, v: &mut Vec<String>, s: &str) {
+    if idx < v.len() {
+        v[idx].clear();
+        v[idx].push_str(s);
+    } else {
+        v.push(String::from(s));
+    }
+}
 
-fn grow_str_vec_or_add(idx: usize, v: &mut Vec<String>, s: &str, line: &str, linecount: usize, i:usize, verbose: usize) {
+fn grow_str_vec_or_add(idx: usize, v: &mut Vec<String>, s: &str, line: &str, linecount: usize, i: usize, verbose: usize) {
     if idx < v.len() {
         if verbose > 1 && v[idx].len() > 0 {
             eprintln!("idx: {} pushing more: {} to existing: {}  line: {} : {}  match# {}", idx, s, v[idx], line, linecount, i);
@@ -654,9 +696,8 @@ fn _worker_multi_re(
             Err(err) => panic!("Cannot parse regular expression {}, error = {}", r, err),
             Ok(r) => r,
         };
-     
+
         re_es.push(re);
-        //cls.push(re.capture_locations());
     }
 
     let mut buff = String::with_capacity(256); // dyn buffer
@@ -672,7 +713,6 @@ fn _worker_multi_re(
 
     let mut acc_idx = 1usize;
     loop {
-
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
             None => {
@@ -689,16 +729,18 @@ fn _worker_multi_re(
             }
             acc_idx = 1;
         } // start new file - start at first RE
-        if cfg.verbose > 1 { eprintln!("file slice index: filename: {} index: {} len: {}", fc.filename, fc.index, fc.len); }
+        if cfg.verbose > 1 {
+            eprintln!("file slice index: filename: {} index: {} len: {}", fc.filename, fc.index, fc.len);
+        }
 
         if !cfg.noop_proc {
             for line in fc.block[0..fc.len].lines() {
                 let line = line?;
                 linecount += 1;
                 let re = &re_es[re_curr_idx];
-                if let Some(record) = re.captures_read(&mut cl, line.as_bytes())? {
+                if let Some(_record) = re.captures_read(&mut cl, line.as_bytes())? {
                     let cw = CapWrap { cl: &cl, text: line.as_str() };
-                    for i in 1 .. cw.len() {
+                    for i in 1..cw.len() {
                         let f = &cw[i];
                         acc_idx += 1;
                         grow_str_vec_or_add(acc_idx, &mut acc_record, f, &line, linecount, i, cfg.verbose);
@@ -708,10 +750,16 @@ fn _worker_multi_re(
                     }
                     re_curr_idx += 1;
                     if re_curr_idx >= re_es.len() {
-                        fieldcount += store_rec(&mut buff, &line, &acc_record, acc_record.len(), &mut map, &cfg, &mut rowcount);
+                        let mut v: Vec<&str> = Vec::with_capacity(acc_record.len()+fc.sub_grps.len());
+                        fc.sub_grps.iter().map(|x| x.as_str()).chain(acc_record.iter().map(|x|x.as_str()))
+                            .for_each(|x| v.push(x)); //
+
+
+                        fieldcount += store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
                         if cfg.verbose > 2 {
                             eprintln!("mRE STORE {:?} on line: {}", acc_record, line);
                         }
+
                         re_curr_idx = 0;
                         acc_record.iter_mut().for_each(move |s| s.clear());
                         for s in &mut acc_record {

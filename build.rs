@@ -19,10 +19,7 @@ where
 fn main() {
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
 
-    File::create(out_dir.join("commit-info.txt"))
-        .unwrap()
-        .write_all(commit_info().as_bytes())
-        .unwrap();
+    File::create(out_dir.join("commit-info.txt")).unwrap().write_all(commit_info().as_bytes()).unwrap();
     println!("cargo:rerun-if-changed=build.rs");
 }
 
@@ -36,21 +33,11 @@ fn commit_info() -> String {
 }
 
 fn commit_hash() -> Result<String, Ignore> {
-    Ok(String::from_utf8(
-        Command::new("git")
-            .args(&["rev-parse", "--short=9", "HEAD"])
-            .output()?
-            .stdout,
-    )?)
+    Ok(String::from_utf8(Command::new("git").args(&["rev-parse", "--short=9", "HEAD"]).output()?.stdout)?)
 }
 
 fn commit_date() -> Result<String, Ignore> {
     Ok(String::from_utf8(
-        Command::new("git")
-            .args(&["log", "-1", "--date=iso", "--pretty=format:%cd"])
-            .output()?
-            .stdout,
+        Command::new("git").args(&["log", "-1", "--date=iso", "--pretty=format:%cd"]).output()?.stdout,
     )?)
 }
-
-

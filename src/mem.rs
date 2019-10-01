@@ -1,10 +1,10 @@
-use std::alloc::{System, GlobalAlloc, Layout};
-use std::sync::{atomic::{AtomicUsize, Ordering::Relaxed}};
+use std::alloc::{GlobalAlloc, Layout, System};
+use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 #[cfg(target_os = "linux")]
-use jemallocator::Jemalloc;
+use jemalloc_ctl::{epoch, stats};
 #[cfg(target_os = "linux")]
-use jemalloc_ctl::{stats, epoch};
+use jemallocator::Jemalloc;
 
 #[derive(Debug)]
 pub struct CounterTlsToAtomicUsize;
@@ -29,7 +29,10 @@ struct MemSettings {
     update_bytes: usize,
 }
 
-static mut MEM_SETTINGS: MemSettings = MemSettings{update_bytes: 256 *1024, update_count: 10};
+static mut MEM_SETTINGS: MemSettings = MemSettings {
+    update_bytes: 256 * 1024,
+    update_count: 10,
+};
 
 thread_local! {
     pub static ALLOCS_LOCAL: RefCell<AllocTrackChunk> = RefCell::new(AllocTrackChunk{ count: 0, sum: 0});
@@ -51,9 +54,7 @@ impl GetAlloc for CounterAtomicUsize {
 }
 impl GetAlloc for CounterUsize {
     fn get_alloc(&self) -> usize {
-        unsafe {
-            ALLOCATED_NUM
-        }
+        unsafe { ALLOCATED_NUM }
     }
 }
 
@@ -70,8 +71,6 @@ impl GetAlloc for Jemalloc {
         stats::active::read().unwrap()
     }
 }
-
-
 
 pub fn set_alloc_settings(update_bytes: usize, update_count: u32) {
     unsafe {
@@ -128,7 +127,7 @@ unsafe impl GlobalAlloc for CounterTlsToAtomicUsize {
                 toret = x.sum;
                 //ALLOCATED_TRACKER.fetch_sub(x.sum, Relaxed);
                 x.count = 0;
-                x.sum=0;
+                x.sum = 0;
             }
             toret
         });
@@ -138,7 +137,6 @@ unsafe impl GlobalAlloc for CounterTlsToAtomicUsize {
         }
     }
 }
-
 
 unsafe impl GlobalAlloc for CounterAtomicUsize {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
@@ -155,7 +153,6 @@ unsafe impl GlobalAlloc for CounterAtomicUsize {
     }
 }
 
-
 unsafe impl GlobalAlloc for CounterUsize {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ret = System.alloc(layout);
@@ -170,4 +167,3 @@ unsafe impl GlobalAlloc for CounterUsize {
         ALLOCATED_NUM -= layout.size();
     }
 }
-
