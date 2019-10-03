@@ -33,7 +33,9 @@ csv -k 0,1 -c ....
 
 TODO/ideas:  
 
- Use stdin as a filelist source in addition to stdin as a data source
+- Better readme
+- csv comment char
+- Use stdin as a filelist source in addition to stdin as a data source
 - additional aggregate functions?:  avg, min, max, empty_count, number_count, zero_count
   - avg done
 - do more work to multi-line re mode - not sure how it should really work yet
