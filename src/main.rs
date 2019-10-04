@@ -36,6 +36,8 @@ use mem::{CounterAtomicUsize, CounterTlsToAtomicUsize, CounterUsize, GetAlloc};
 use std::collections::HashMap;
 use std::ops::Index;
 use csv::StringRecord;
+use smallvec::SmallVec;
+use std::io::BufReader;
 
 //use bstr::ByteSlice;
 
@@ -551,8 +553,12 @@ fn _worker_re(
                 break;
             }
         };
+        use std::io::BufRead;
+
         if !cfg.noop_proc {
-            for line in fc.block[0..fc.len].lines() {
+            let mut slice = &fc.block[0..fc.len];
+
+            for line in slice.lines() {
                 let line = line?;
                 if let Some(ref line_contains) = cfg.re_line_contains {
                     if !line.contains(line_contains) {
@@ -564,18 +570,18 @@ fn _worker_re(
                 }
 
                 if let Some(_record) = re.captures_read(&mut cl, line.as_bytes())? {
-                    let mut v: Vec<&str> = Vec::with_capacity(cl.len()+fc.sub_grps.len());
+                    let mut v = SmallVec::<[&str; 16]>::new();
+                    //let mut v: Vec<&str> = Vec::with_capacity(cl.len()+fc.sub_grps.len());
                     for x in fc.sub_grps.iter() {
                         v.push(x);
                     }
-                    for i in 1 .. cl.len() {
+                    for i in 1..cl.len() {
                         let r = cl.get(i).unwrap();
-                        v.push(&line[r.0 .. r.1]);
+                        v.push(&line[r.0..r.1]);
                     }
-                    if cfg.verbose > 2 { eprintln!("DBG RE WITH FILE PASTS VEC: {:?}", v);}
-
-
+                    if cfg.verbose > 2 { eprintln!("DBG RE WITH FILE PASTS VEC: {:?}", v); }
                     fieldcount += store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
+                    //v.clear();
                 } else {
                     _skipped += 1;
                 }
@@ -609,7 +615,7 @@ fn _worker_csv(
 
     let mut builder = csv::ReaderBuilder::new();
     //let delimiter = dbg!(cfg.delimiter.expect("delimiter is malformed"));
-    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.skip_header).flexible(true);
+    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.skip_header).flexible(true).comment(Some(b'#'));
 
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
@@ -631,7 +637,8 @@ fn _worker_csv(
             if add_subs {
                 for record in recrdr.records() {
                     let record = record?;
-                    let mut v: Vec<&str> = Vec::with_capacity(record.len() + fc.sub_grps.len());
+                    let mut v = SmallVec::<[&str; 16]>::new();
+//                    let mut v: Vec<&str> = Vec::with_capacity(record.len() + fc.sub_grps.len());
                     fc.sub_grps.iter().map(|x| x.as_str()).chain(record.iter())
                       .for_each(|x| v.push(x)); //
                     if cfg.verbose > 2 { eprintln!("DBG WITH FILE PASTS VEC: {:?}", v);}

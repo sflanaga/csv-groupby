@@ -49,6 +49,7 @@ structopt = {version = "0.3.1", feature=["color","termsize","wrap_help"]}
 cpu-time = "0.1.0"
 atty = "0.2"
 csv = "~1"
+smallvec = "0.6.10"
 grep-cli = "0.1.3"
 regex = "1.3.1"
 pcre2 = "0.2.2"
