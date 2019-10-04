@@ -168,6 +168,14 @@ pub struct CliCfg {
     /// reuses data allocated for IO blocks - not necessarily faster
     pub recycle_io_blocks: bool,
 
+    #[structopt(long = "disable_key_sort")]
+    /// disables the key sort
+    ///
+    /// The key sort used is special in that it attempts to sort the key numerically where
+    /// they appear as numbers and as strings (ignoring case) otherwise like Excel
+    /// would sort things
+    pub disable_key_sort: bool,
+
     // #[structopt(long = "exit_on_badblock")]
     // /// Exit when there is an error within a block
     // ///

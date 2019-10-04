@@ -7,11 +7,12 @@ use prettytable::{cell::Cell, format, row::Row, Table};
 use regex::{CaptureLocations, Regex};
 use std::alloc::System;
 use std::{
+    cmp::Ordering,
     collections::{BTreeMap, HashSet},
     io::prelude::*,
     path::PathBuf,
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, Ordering::Relaxed},
         Arc,
     },
     thread,
@@ -38,6 +39,7 @@ use std::ops::Index;
 use csv::StringRecord;
 use smallvec::SmallVec;
 use std::io::BufReader;
+use std::cmp::Ordering::{Less, Greater, Equal};
 
 //use bstr::ByteSlice;
 
@@ -91,7 +93,7 @@ fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>
     let startcpu = ProcessTime::now();
     loop {
         thread::sleep(Duration::from_millis(250));
-        if thread_stopper.load(Ordering::Relaxed) {
+        if thread_stopper.load(Relaxed) {
             break;
         }
         let total_bytes = status.bytes.load(std::sync::atomic::Ordering::Relaxed);
@@ -319,7 +321,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         sum_maps(&mut main_map, all_the_maps, cfg.verbose);
     }
 
-    stopper.swap(true, Ordering::Relaxed);
+    stopper.swap(true, Relaxed);
 
     // OUTPUT
     // write the data structure
@@ -337,6 +339,62 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     } // write extra line at the end of stderr in case the ticker munges things
 
     let startout = Instant::now();
+
+    let mut thekeys: Vec<_> = main_map.keys().clone().collect();
+    let chosen_cmp = {
+        // partially taken from:
+        // https://github.com/DanielKeep/rust-scan-rules/blob/master/src/input.rs#L610-L620
+        // but enhanced as a generic Ordering
+        fn str_cmp_ignore_case(a: &str, b: &str) -> Ordering {
+            let mut acs = a.chars().flat_map(char::to_lowercase);
+            let mut bcs = b.chars().flat_map(char::to_lowercase);
+            loop {
+                match (acs.next(), bcs.next()) {
+                    (Some(a), Some(b)) => {
+                        let x = a.cmp(&b);
+                        if x == Equal { continue; } else { return x; }
+                    },
+                    (None, None) => return Equal,
+                    (Some(_), None) => return Greater, // "aaa" will appear before "aaaz"
+                    (None, Some(_)) => return Less,
+                }
+            }
+        }
+
+        let cmp_f64_str = |l_k: &&str, r_k: &&str| -> Ordering {
+            for (l, r) in l_k.split('|').zip(r_k.split('|')) {
+                let res: Ordering = {
+                    // compare as numbers if you can
+                    let lf = l.parse::<f64>();
+                    let rf = r.parse::<f64>();
+                    match (lf, rf) {
+                        (Ok(lv), Ok(rv)) => lv.partial_cmp(&rv).unwrap_or(Equal),
+                        // fall back to string comparison
+                        (Err(_), Err(_)) => str_cmp_ignore_case(&l, &r), // l.cmp(r),
+                        // here Err means not a number while Ok means a number
+                        // number is less than string
+                        (Ok(_), Err(_)) => Less,
+                        // string is greater than number
+                        (Err(_), Ok(_)) => Greater,
+                    }
+                };
+                if res != Equal {
+                    return res;
+                } // else keep going if this level is equal
+            }
+            Equal
+        };
+        cmp_f64_str
+    };
+    if !cfg.disable_key_sort {
+        let cpu_keysort_s = ProcessTime::now();
+        thekeys.sort_unstable_by(|l, r| { chosen_cmp(&l.as_str(), &r.as_str()) });
+        if cfg.verbose > 1 {
+            let elapsedcpu: Duration = cpu_keysort_s.elapsed();
+            let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
+            eprintln!("sort cpu time {:.3}s", seccpu);
+        }
+    }
 
     if !cfg.no_output {
         if !cfg.csv_output {
@@ -367,7 +425,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 celltable.borrow_mut().set_titles(row);
             }
 
-            for (ff, cc) in &main_map {
+            for ff in thekeys.iter() {
                 let mut vcell = vec![];
                 ff.split('|').for_each(|x| {
                     if x.len() <= 0 {
@@ -376,6 +434,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                         vcell.push(Cell::new(&x));
                     }
                 });
+                let cc = main_map.get(*ff).unwrap();
 
                 if !cfg.no_record_count {
                     vcell.push(Cell::new(&format!("{}", cc.count)));
@@ -426,11 +485,6 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 println!("{}", vcell.join(&cfg.od));
             }
-            let mut thekeys: Vec<String> = Vec::new();
-            for (k, _v) in &main_map {
-                thekeys.push(k.clone());
-            }
-            thekeys.sort_unstable();
             for ff in thekeys.iter() {
                 let mut vcell = vec![];
                 ff.split('|').for_each(|x| {
@@ -440,7 +494,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                         vcell.push(x.to_string());
                     }
                 });
-                let cc = main_map.get(ff).unwrap();
+                let cc = main_map.get(*ff).unwrap();
                 if !cfg.no_record_count {
                     vcell.push(format!("{}", cc.count));
                 }
@@ -842,7 +896,7 @@ where
                 let v = &record[index];
                 match v.as_ref().parse::<f64>() {
                     Err(_) => {
-                        if cfg.verbose >= 1 {
+                        if cfg.verbose > 2 {
                             eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
                         }
                     }
@@ -859,7 +913,7 @@ where
                 let v = &record[index];
                 match v.as_ref().parse::<f64>() {
                     Err(_) => {
-                        if cfg.verbose >= 1 {
+                        if cfg.verbose > 2 {
                             eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
                         }
                     }

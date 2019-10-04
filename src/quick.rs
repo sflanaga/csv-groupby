@@ -11,14 +11,105 @@ use std::rc::Rc;
 use std::str::from_utf8;
 use std::sync::Arc;
 
+use std::cmp::{Ordering::*, Ord, Ordering};
+
 pub mod gen;
 
 fn main() {
-    if let Err(e) = test_regrow_str() {
+    if let Err(e) = sort_parse_key() {
         println!("Application error: {}", e);
         std::process::exit(1);
     }
 }
+
+/*
+9
+dog
+cat
+aaaz
+aaa
+120
+12.0
+Pac
+101
+0
+Cat
+
+packet
+*/
+
+fn sort_parse_key() -> Result<(), std::io::Error> {
+    let mut v = vec![];
+    v.push("9");
+    v.push("dog");
+    v.push("cat");
+    v.push("120");
+    v.push("2|999|10");
+    v.push("1|9|99");
+    v.push("1|9|0");
+    v.push("dog|1000|10");
+    v.push("120");
+    v.push("aaaz");
+    v.push("aaa");
+    v.push("12.0");
+    v.push("Pac");
+    v.push("101");
+    v.push("0");
+    v.push("");
+    v.push("packet");
+    v.push("Cat");
+
+    let del = '|';
+
+    fn str_cmp_ignore_case(a: &str, b: &str) -> Ordering {
+        let mut acs = a.chars().flat_map(char::to_lowercase);
+        let mut bcs = b.chars().flat_map(char::to_lowercase);
+        loop {
+            match (acs.next(), bcs.next()) {
+                (Some(a), Some(b)) => {
+                    let x = a.cmp(&b);
+                    if x == Equal { continue; }
+                    else { return x; }
+                },
+                (None, None) => return Equal,
+                (Some(_), None) => return Greater,
+                (None, Some(_)) => return Less,
+            }
+        }
+    }
+
+    let cmp_f64_str = |l_k: &&str,r_k: &&str| -> Ordering {
+        for (l,r) in l_k.split(del).zip(r_k.split(del)) {
+            let res = {
+                // compare as numbers if you can
+                let lf = l.parse::<f64>();
+                let rf = r.parse::<f64>();
+                match (lf, rf) {
+                    (Ok(lv), Ok(rv)) => lv.partial_cmp(&rv).unwrap_or(Equal),
+                    // fall back to string comparison
+                    (Err(_), Err(_)) => str_cmp_ignore_case(&l, &r), // l.cmp(r),
+                    // here Err means not a number while Ok means a number
+                    // number is less than string
+                    (Ok(_), Err(_)) => Less,
+                    // string is greater than number
+                    (Err(_), Ok(_)) => Greater,
+                }
+            };
+            if res != Equal {
+                return res;
+            } // else keep going if this level is equal
+        }
+        Equal
+    };
+
+    let chosen_cmp = cmp_f64_str;
+
+    v.sort_unstable_by(chosen_cmp);
+
+    println!("{:#?}", v);
+    Ok(())
+}
+
 
 fn test_regrow_str() -> Result<(), std::io::Error> {
 
