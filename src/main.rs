@@ -8,7 +8,7 @@ use regex::{CaptureLocations, Regex};
 use std::alloc::System;
 use std::{
     cmp::Ordering,
-    collections::{BTreeMap, HashSet},
+    collections::{HashSet, HashMap, BTreeMap},
     io::prelude::*,
     path::PathBuf,
     sync::{
@@ -18,8 +18,19 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
+use fnv::FnvHashMap;
 
-type MyMap = BTreeMap<String, KeySum>;
+//type MyMap = BTreeMap<String, KeySum>;
+//type MyMap = HashMap<String, KeySum>;
+type MyMap = FnvHashMap<String, KeySum>;
+
+
+fn create_map<K,V>() -> FnvHashMap<K,V>
+    where
+        K: Eq + Hash,
+{
+    FnvHashMap::with_capacity_and_hasher(1000, Default::default())
+}
 
 mod cli;
 mod gen;
@@ -34,21 +45,19 @@ use ignore::WalkBuilder;
 use testre::testre;
 
 use mem::{CounterAtomicUsize, CounterTlsToAtomicUsize, CounterUsize, GetAlloc};
-use std::collections::HashMap;
 use std::ops::Index;
 use csv::StringRecord;
 use smallvec::SmallVec;
 use std::io::BufReader;
 use std::cmp::Ordering::{Less, Greater, Equal};
-
-//use bstr::ByteSlice;
+use std::hash::{BuildHasher, Hash};
 
 //pub static GLOBAL_TRACKER: std::alloc::System = std::alloc::System;
 //pub static GLOBAL_TRACKER: System = System; //CounterAtomicUsize = CounterAtomicUsize;
 #[cfg(target_os = "linux")]
 #[global_allocator]
-pub static GLOBAL_TRACKER: CounterTlsToAtomicUsize = CounterTlsToAtomicUsize;
-//pub static GLOBAL_TRACKER: jemallocator::Jemalloc = jemallocator::Jemalloc;
+//pub static GLOBAL_TRACKER: CounterTlsToAtomicUsize = CounterTlsToAtomicUsize;
+pub static GLOBAL_TRACKER: jemallocator::Jemalloc = jemallocator::Jemalloc;
 
 #[cfg(target_os = "windows")]
 #[global_allocator]
@@ -149,7 +158,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         testre(&cfg)?;
         return Ok(());
     }
-    let mut main_map = MyMap::new();
+    use fnv::FnvHashMap;
+    let mut main_map = create_map();
     if cfg.verbose >= 1 {
         eprintln!("map type: {}", type_name_of(&main_map));
     }
@@ -330,9 +340,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     // restore indexes to users input - really just makes testing slightly easier
     fn re_mod_idx<T>(_cfg: &CliCfg, v: T) -> T
     where
-        T: std::ops::Sub<Output = T> + From<usize>,
+        T: std::ops::Sub<Output = T> + std::ops::Add<Output = T> + From<usize>,
     {
-            v
+        (v + 1.into())
     }
     if do_ticker {
         eprintln!();
@@ -392,7 +402,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         if cfg.verbose > 1 {
             let elapsedcpu: Duration = cpu_keysort_s.elapsed();
             let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
-            eprintln!("sort cpu time {:.3}s", seccpu);
+            eprintln!("sort cpu time {:.3}s of {} entries", seccpu, thekeys.len());
         }
     }
 
@@ -581,7 +591,7 @@ fn _worker_re(
 ) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
-    let mut map = MyMap::new();
+    let mut map = create_map();
 
     let re_str = &cfg.re_str[0];
     if cfg.verbose > 2 {
@@ -610,7 +620,7 @@ fn _worker_re(
         use std::io::BufRead;
 
         if !cfg.noop_proc {
-            let mut slice = &fc.block[0..fc.len];
+            let slice = &fc.block[0..fc.len];
 
             for line in slice.lines() {
                 let line = line?;
@@ -665,11 +675,11 @@ fn _worker_csv(
 ) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
-    let mut map = MyMap::new();
+    let mut map = create_map();
 
     let mut builder = csv::ReaderBuilder::new();
     //let delimiter = dbg!(cfg.delimiter.expect("delimiter is malformed"));
-    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.skip_header).flexible(true).comment(Some(b'#'));
+    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.skip_header).flexible(true);//.escape(Some(b'\\')).flexible(true).comment(Some(b'#'));
 
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
@@ -748,7 +758,7 @@ fn _worker_multi_re(
     cfg: &CliCfg,
     recv: &crossbeam_channel::Receiver<Option<FileSlice>>,
 ) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
-    let mut map = MyMap::new();
+    let mut map = create_map();
 
     let mut re_es = vec![];
     //let mut cls = vec![];
@@ -973,6 +983,8 @@ fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
     let end = Instant::now();
     let dur = end - start;
     if verbose > 0 {
-        println!("re thread merge maps time: {:.3}s", dur.as_millis() as f64 / 1000.0f64);
+        use itertools::join;
+        eprintln!("merge maps time: {:.3}s from map lens [{}] to single {}", dur.as_millis() as f64 / 1000.0f64,
+                 join(maps.iter().map(|x| x.len().to_string()), ","), p_map.len());
     }
 }

@@ -41,7 +41,7 @@ mod tests {
         input_str
     }
 
-    static EXPECTED_OUT1: &str = "k:0,count,s:3,a:0,u:1
+    static EXPECTED_OUT1: &str = "k:1,count,s:4,a:1,u:2
 0,99,99000,0,99
 1,100,99200,1,100
 2,100,99400,2,100
@@ -54,7 +54,7 @@ mod tests {
 9,100,100800,9,100
 ";
 
-    static EXPECTED_OUT2: &str = "k:0,count,s:3,a:0,u:1
+    static EXPECTED_OUT2: &str = "k:1,count,s:4,a:1,u:2
 0,198,198000,0,99
 1,200,198400,1,100
 2,200,198800,2,100
@@ -69,7 +69,7 @@ mod tests {
 
     fn stdin_test_driver(args: &str, input: &str, expected_output: &'static str) -> Result<(), Box<dyn std::error::Error>> {
         println!("stdin test pre {}", args);
-        let mut cmd: Command = Command::cargo_bin("csv")?;
+        let mut cmd: Command = Command::cargo_bin("gb")?;
         println!("command ran? {:#?} args: {}", cmd, args);
         let args = args.split(' ');
         println!("stdin test split");

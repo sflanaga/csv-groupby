@@ -64,6 +64,7 @@ impl GetAlloc for System {
     }
 }
 
+
 #[cfg(target_os = "linux")]
 impl GetAlloc for Jemalloc {
     fn get_alloc(&self) -> usize {
@@ -71,6 +72,7 @@ impl GetAlloc for Jemalloc {
         stats::active::read().unwrap()
     }
 }
+
 
 pub fn set_alloc_settings(update_bytes: usize, update_count: u32) {
     unsafe {
@@ -153,6 +155,7 @@ unsafe impl GlobalAlloc for CounterAtomicUsize {
     }
 }
 
+// essentially wrong but here to test performance vs others
 unsafe impl GlobalAlloc for CounterUsize {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ret = System.alloc(layout);

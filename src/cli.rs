@@ -46,11 +46,11 @@ pub struct CliCfg {
     /// Line(s) of text to test - best surrounded by quotes
     pub testlines: Vec<String>,
 
-    #[structopt(short = "k", long = "key_fields", name = "keyfield", use_delimiter(true), conflicts_with = "testre", )]
+    #[structopt(short = "k", long = "key_fields", name = "keyfield", use_delimiter(true), conflicts_with = "testre", min_values(1))]
     /// Fields that will act as group by keys - base index 1
     pub key_fields: Vec<usize>,
 
-    #[structopt(short = "u", long = "unique_values", name = "uniquefield", use_delimiter(true))]
+    #[structopt(short = "u", long = "unique_values", name = "uniquefield", use_delimiter(true), min_values(1))]
     /// Fields to count distinct - base index 1
     pub unique_fields: Vec<usize>,
 
@@ -66,11 +66,11 @@ pub struct CliCfg {
     /// number of distros to write with the lowest counts
     pub write_distros_bottom: usize,
 
-    #[structopt(short = "s", long = "sum_values", name = "sumfield", use_delimiter(true))]
+    #[structopt(short = "s", long = "sum_values", name = "sumfield", use_delimiter(true), min_values(1))]
     /// Field to sum as float64s - base index 1
     pub sum_fields: Vec<usize>,
 
-    #[structopt(short = "a", long = "avg_values", name = "avgfield", use_delimiter(true))]
+    #[structopt(short = "a", long = "avg_values", name = "avgfield", use_delimiter(true), min_values(1))]
     /// Field to average if parseable number values found - base index 1
     pub avg_fields: Vec<usize>,
 
@@ -188,6 +188,14 @@ pub struct CliCfg {
     pub stdin_filelist: bool,
 }
 
+fn add_n_check(indices:&mut Vec<usize>, comment: &str) -> Result<()> {
+    for x in indices.iter_mut() {
+        if *x == 0 {Err(format!("Field indices must be 1 or greater - using base 1 indexing, got a {} for option {}", *x, comment))?; }
+        *x -= 1;
+    }
+    Ok(())
+}
+
 pub fn get_cli() -> Result<Arc<CliCfg>> {
     // CliCfg is made immutable for thread saftey - does not need to be
     // changed after a this point.  But, we must using Arc in combination
@@ -204,28 +212,17 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
                 eprintln!("Override thread number to 1 since you have multiple [{}] REs listed ", cfg.re_str.len());
             }
         }
-        fn re_map(v: usize) -> usize {
-            if v <= 0 { panic!("Field indices must start at base 1"); }
-            v-1
+        fn re_map(v: usize) -> Result<usize> {
+            if v <= 0 { return Err("Field indices must start at base 1")?; }
+            Ok(v-1)
         }
-        cfg.key_fields.iter_mut().for_each(|x| *x = re_map(*x));
-        cfg.sum_fields.iter_mut().for_each(|x| *x = re_map(*x));
-        cfg.avg_fields.iter_mut().for_each(|x| *x = re_map(*x));
-        cfg.unique_fields.iter_mut().for_each(|x| *x = re_map(*x));
-        cfg.write_distros.iter_mut().for_each(|x| *x = re_map(*x));
 
+        add_n_check(&mut cfg.key_fields, "-k")?;
+        add_n_check(&mut cfg.sum_fields, "-s")?;
+        add_n_check(&mut cfg.avg_fields, "-a")?;
+        add_n_check(&mut cfg.unique_fields, "-u")?;
+        add_n_check(&mut cfg.write_distros, "--write_distros")?;
 
-//        if cfg.re_str.len() > 0 {
-//            if !cfg.fullmatch_as_field {
-//                cfg.key_fields.iter_mut().for_each(|x| *x += 1);
-//                cfg.sum_fields.iter_mut().for_each(|x| *x += 1);
-//                cfg.avg_fields.iter_mut().for_each(|x| *x += 1);
-//                cfg.unique_fields.iter_mut().for_each(|x| *x += 1);
-//                cfg.write_distros.iter_mut().for_each(|x| *x += 1);
-//            } else {
-//                eprintln!("Using full regex match as 0th field")
-//            }
-//        }
         if cfg.re_line_contains.is_some() && cfg.re_str.len() <= 0 {
             Err("re_line_contains requires -r regex option to be used")?;
         }
@@ -246,8 +243,10 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
                 }
             }
         }
-        if cfg.verbose >= 2 {
-            eprintln!("{:#?}", cfg);
+        if cfg.verbose == 1 {
+            eprintln!("CLI options: {:?}", cfg);
+        } else if cfg.verbose > 1 {
+            eprintln!("CLI options: {:#?}", cfg);
         }
         if cfg.testre.is_none() && cfg.key_fields.len() <= 0 && cfg.sum_fields.len() <= 0 && cfg.avg_fields.len() <= 0 && cfg.unique_fields.len() <= 0 {
             Err("No work to do! - you should specify at least one or more field options or a testre")?;
