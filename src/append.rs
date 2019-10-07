@@ -40,8 +40,8 @@ fn get_reader_writer() -> (impl BufRead, impl Write) {
 #[cfg(target_os = "windows")]
 fn get_reader_writer() -> (impl BufRead, impl Write) {
     use std::os::windows::io::{AsRawHandle, FromRawHandle};
-    let stdin = unsafe { File::from_raw_handle(io::stdin().as_raw_handle()) };
-    let stdout = unsafe { File::from_raw_handle(io::stdout().as_raw_handle()) };
+    let stdin = unsafe { File::from_raw_handle(std::io::stdin().as_raw_handle()) };
+    let stdout = unsafe { File::from_raw_handle(std::io::stdout().as_raw_handle()) };
 
     let (mut reader, mut writer) = (BufReader::new(stdin), BufWriter::new(stdout));
     (reader, writer)
