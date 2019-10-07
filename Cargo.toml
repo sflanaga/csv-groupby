@@ -6,6 +6,11 @@ authors = ["Steve Flanagan"]
 
 description="sql group by on arbitrary text or csv files"
 
+homepage="https://github.com/sflanaga/csv-groupby"
+documentation="https://github.com/sflanaga/csv-groupby"
+repository="https://github.com/sflanaga/csv-groupby"
+license = "Unlicense OR MIT"
+
 [profile.dev]
 panic = 'abort'
 
