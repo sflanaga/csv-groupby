@@ -1,6 +1,7 @@
 # csv-groupby
 ## `gb`   A Command that does a SQL like "group by" on delimited files OR arbitrary lines of text
 
+
 gb is a command that takes delimited data (like csv files) or lines of text (like a log file) and emulates a SQL select-group-by on that data.  This is a utility partially inspired by [xsv](https://github.com/BurntSushi/xsv) and the desire to stop having to write the same perl one-liners to analyze massive log files.
 
 - Do group-bys with sums, counts, and count distincts
@@ -104,8 +105,13 @@ This example will peal off the date from mayapp log files and summarize the ERRO
 
 This is example of using the file path as part of the reporting.  
 ```
- gb --walk /some/log/directoryh -p 'myapp.*(2019-\d\d-\d\d).log' -r '.*ERROR(.{5,40}).*' -k 1,2
+ gb --walk /some/log/directory -p 'myapp.*(2019-\d\d-\d\d).log' -r '.*ERROR(.{5,40}).*' -k 1,2
 ```
+Here the subgroups of 1 and 2 are used to create a composite key of the date from the log file name, and the bit of text after the ERROR string in the log file.
+
+## Test RE Mode
+If you want to test how how a line of text and your regular expression interact use the options -R "some regular expression" and the -L "line of text" to get the sub groups gb will find.
+
 
 ## Help  `gb --help`
 ```
@@ -224,8 +230,6 @@ OPTIONS:
 
     -w, --walk <walk>
             recursively walk a tree of files to parse
-```
-
 
 TODO/ideas:  
 
