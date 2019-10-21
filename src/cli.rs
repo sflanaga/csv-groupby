@@ -9,12 +9,7 @@ use structopt::StructOpt;
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn get_default_thread_no() -> usize {
-    let cpu_count = num_cpus::get();
-    let mut default_thread = cpu_count;
-    if cpu_count > 12 {
-        default_thread = 12;
-    }
-    default_thread
+    if num_cpus::get() > 12 { 12 } else { num_cpus::get() }
 }
 
 fn get_default_queue_size() -> usize {
@@ -213,7 +208,7 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
             }
         }
         fn re_map(v: usize) -> Result<usize> {
-            if v <= 0 { return Err("Field indices must start at base 1")?; }
+            if v == 0 { return Err("Field indices must start at base 1")?; }
             Ok(v-1)
         }
 
@@ -223,14 +218,11 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
         add_n_check(&mut cfg.unique_fields, "-u")?;
         add_n_check(&mut cfg.write_distros, "--write_distros")?;
 
-        if cfg.re_line_contains.is_some() && cfg.re_str.len() <= 0 {
+        if cfg.re_line_contains.is_some() && cfg.re_str.is_empty() {
             Err("re_line_contains requires -r regex option to be used")?;
         }
         for re in &cfg.re_str {
-            match Regex::new(re) {
-                Err(err) => Err(err)?,
-                _ => {}
-            };
+            if let Err(err) = Regex::new(re) { Err(err)? }
         }
         {
             if cfg.write_distros.len() > cfg.unique_fields.len() {
@@ -248,12 +240,12 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
         } else if cfg.verbose > 1 {
             eprintln!("CLI options: {:#?}", cfg);
         }
-        if cfg.testre.is_none() && cfg.key_fields.len() <= 0 && cfg.sum_fields.len() <= 0 && cfg.avg_fields.len() <= 0 && cfg.unique_fields.len() <= 0 {
+        if cfg.testre.is_none() && cfg.key_fields.is_empty() && cfg.sum_fields.is_empty() && cfg.avg_fields.is_empty() && cfg.unique_fields.is_empty() {
             Err("No work to do! - you should specify at least one or more field options or a testre")?;
         }
         if cfg.re_path.is_some() {
-            if cfg.files.len() <= 0 && cfg.walk.is_none() {
-                Err("Cannot use a re_path setting with STDIN as input")?;
+            if cfg.files.is_empty() && cfg.walk.is_none() {
+                return Err("Cannot use a re_path setting with STDIN as input")?;
             }
             let _ = Regex::new(&cfg.re_path.as_ref().unwrap())?;
         }

@@ -1,7 +1,6 @@
 use std::error::Error;
 use std::{
-    fs::File,
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{Write},
 };
 
 use bstr::io::BufReadExt;
@@ -29,25 +28,19 @@ struct AppendCli {
     /// Verbosity - use more than one v for greater detail
     pub verbose: usize,
 }
-#[cfg(target_os = "linux")]
-fn get_reader_writer() -> (impl BufRead, impl Write) {
-    use std::os::unix::io::FromRawFd;
-    let stdin = unsafe { File::from_raw_fd(0) };
-    let stdout = unsafe { File::from_raw_fd(1) };
-    let (reader, writer) = (BufReader::new(stdin), BufWriter::new(stdout));
-    (reader, writer)
-}
-#[cfg(target_os = "windows")]
-fn get_reader_writer() -> (impl BufRead, impl Write) {
-    use std::os::windows::io::{AsRawHandle, FromRawHandle};
-    let stdin = unsafe { File::from_raw_handle(std::io::stdin().as_raw_handle()) };
-    let stdout = unsafe { File::from_raw_handle(std::io::stdout().as_raw_handle()) };
 
-    let (mut reader, mut writer) = (BufReader::new(stdin), BufWriter::new(stdout));
-    (reader, writer)
+mod gen;
+use gen::{get_reader_writer};
+
+fn main() {
+    if let Err(err) = _main() {
+        eprintln!("error: {}", &err);
+        std::process::exit(1);
+    }
+
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
+fn _main() -> Result<(), Box<dyn Error>> {
     let cli: AppendCli = AppendCli::from_args();
     let start_f = Instant::now();
 
@@ -56,17 +49,17 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let (reader, mut writer) = get_reader_writer();
     reader.for_byte_line(|line| {
-        if line.len() <= 0 {
-            ()
+        if line.len() == 0 {
+            panic!("test entry from -L (line) was empty")
         }
         if cli.prefix_str.len() > 0 {
-            writer.write(cli.prefix_str.as_bytes())?;
+            writer.write_all(cli.prefix_str.as_bytes())?;
         }
-        writer.write(line.as_bytes())?;
+        writer.write_all(line.as_bytes())?;
         if cli.append_str.len() > 0 {
-            writer.write(cli.append_str.as_bytes())?;
+            writer.write_all(cli.append_str.as_bytes())?;
         }
-        writer.write(&[b'\n' as u8])?;
+        writer.write_all(&[b'\n' as u8])?;
         Ok(true)
     })?;
     writer.flush()?;

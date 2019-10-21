@@ -35,11 +35,11 @@ pub fn testre(c: &CliCfg) -> Result<(), Box<dyn std::error::Error>> {
     let sre = c.testre.as_ref().unwrap();
     let re = Regex::new(sre)?;
 
-    if c.testlines.len() > 0 {
+    if !c.testlines.is_empty() {
         for l in &c.testlines {
             teststr(&re, &l, &sre, c.verbose)?;
         }
-    } else if c.files.len() <= 0 {
+    } else {
         eprintln!("<<< waiting on input lines");
         let stdin = std::io::stdin();
         for l in stdin.lock().lines().map(|l| l.unwrap()) {
@@ -60,7 +60,7 @@ fn teststr(re: &Regex, l: &str, sre: &str, verbose: usize) -> Result<(), Box<dyn
         for i in 0..caps.len() {
             println!("\t{}: \"{}\"", i, &caps[i]);
         }
-        println!("");
+        println!();
     } else {
         eprintln!("NO match with RE \"{}\" against: \"{}\"", sre, l);
     }

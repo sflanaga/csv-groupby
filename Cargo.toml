@@ -1,15 +1,17 @@
 [package]
 edition = '2018'
 name = "csv-groupby"
-version = "0.6.1"
+version = "0.6.2"
 authors = ["Steve Flanagan"]
 
-description="sql group by on arbitrary text or csv files"
+description="execute a sql-like group-by on arbitrary text or csv files"
 
 homepage="https://github.com/sflanaga/csv-groupby"
 documentation="https://github.com/sflanaga/csv-groupby"
 repository="https://github.com/sflanaga/csv-groupby"
 license = "Unlicense OR MIT"
+readme="README.md"
+keywords=["report", "text", "sql", "grep", "csv", "regex"]
 
 [profile.dev]
 panic = 'abort'
@@ -71,7 +73,9 @@ num_cpus = "1.0"
 clap = "~2"
 colored = "1.8"
 itertools = "0.8.0"
-fnv = "1.0.3"
+fxhash = "0.2.1"
+fnv = "1.0.6"
+seahash = "3.0.6"
 
 
 assert_cmd = "0.10"

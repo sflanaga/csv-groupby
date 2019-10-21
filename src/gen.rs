@@ -1,18 +1,17 @@
 use grep_cli::DecompressionReader;
 use std::collections::HashMap;
 use std::fmt::Display;
-use std::io::Read;
+use std::io::{Read, BufRead, Write, BufReader, BufWriter};
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc, Mutex,
 };
 use std::{fs, thread};
-use pcre2::bytes::{CaptureLocations as CaptureLocations_pcre2, Captures as Captures_pcre2, Regex as Regex_pre2};
-use regex::internal::Input;
-use bstr::ByteSlice;
+use pcre2::bytes::{Captures as Captures_pcre2, Regex as Regex_pre2};
+use std::fs::File;
 
-pub fn distro_format<T>(map: &HashMap<T, usize>, upper: usize, bottom: usize) -> String
+pub fn distro_format<T,S>(map: &HashMap<T, usize, S>, upper: usize, bottom: usize) -> String
 where
     T: std::fmt::Display + std::fmt::Debug + std::clone::Clone + Ord,
 {
@@ -33,16 +32,16 @@ where
 
     let mut msg = String::with_capacity(16);
     if upper + bottom >= vec.len() {
-        for i in 0..vec.len() {
-            msg.push_str(&format!("({} x {})", vec[i].1, vec[i].0));
+        for e in &vec {
+            msg.push_str(&format!("({} x {})", e.1, e.0));
         }
     } else {
-        for i in 0..upper {
-            msg.push_str(&format!("({} x {})", vec[i].1, vec[i].0));
+        for e in vec.iter().take(upper) {
+            msg.push_str(&format!("({} x {})", e.1, e.0));
         }
         msg.push_str(&format!("..{}..", vec.len() - (bottom + upper)));
-        for i in vec.len() - bottom..vec.len() {
-            msg.push_str(&format!("({} x {})", vec[i].1, vec[i].0));
+        for e in vec.iter().skip(vec.len() - bottom) {
+            msg.push_str(&format!("({} x {})", e.1, e.0));
         }
     }
     msg
@@ -86,11 +85,11 @@ fn mem_metric<'a>(v: usize) -> (f64, &'a str) {
     const METRIC: [&str; 8] = ["B ", "KB", "MB", "GB", "TB", "PB", "EB", "ZB"];
 
     let mut size = 1usize << 10;
-    for i in 0..METRIC.len() {
+    for e in &METRIC {
         if v < size {
-            return ((v as f64 / (size >> 10) as f64) as f64, &METRIC[i]);
+            return ((v as f64 / (size >> 10) as f64) as f64, e);
         }
-        size = size << 10;
+        size <<= 10;
     }
     (v as f64, "")
 }
@@ -121,7 +120,7 @@ fn sig_dig(v: f64, digits: usize) -> String {
 }
 
 pub fn mem_metric_digit(v: usize, sig: usize) -> String {
-    if v <= 0 || v > std::usize::MAX / 2 {
+    if v == 0 || v > std::usize::MAX / 2 {
         return format!("{:>width$}", "unknown", width = sig + 3);
     }
     let vt = mem_metric(v);
@@ -179,7 +178,7 @@ pub fn greek(v: f64) -> String {
 
     let mut s = format!("{}", t.0);
     s.truncate(4);
-    if s.ends_with(".") {
+    if s.ends_with('.') {
         s.pop();
     }
 
@@ -198,7 +197,7 @@ pub fn user_pause() {
     let _it = stdin.read(&mut buf[..]);
 }
 
-#[derive(Debug)]
+#[derive(Default, Debug)]
 pub struct IoSlicerStatus {
     pub bytes: AtomicUsize,
     pub files: AtomicUsize,
@@ -227,7 +226,7 @@ pub struct FileSlice {
 pub fn io_thread_slicer(
     recv_blocks: &crossbeam_channel::Receiver<Vec<u8>>,
     currfilename: &dyn Display,
-	file_subgrps: &Vec<String>,
+	file_subgrps: &[String],
     block_size: usize,
     recycle_io_blocks: bool,
     verbosity: usize,
@@ -263,12 +262,7 @@ pub fn io_thread_slicer(
             (expected_sz, sz)
         };
 
-        let mut apparent_eof = false;
-
-        if !(expected_sz == sz) {
-            // eprintln!("<<<EOF expect {} size {}", expected_sz, sz);
-            apparent_eof = true;
-        }
+        let apparent_eof = expected_sz != sz;
 
         let mut end = 0;
         let mut found = false;
@@ -296,11 +290,11 @@ pub fn io_thread_slicer(
                     eprintln!("WARNING: sending no EOL found in block around file:pos {}:{} ", currfilename, curr_pos);
                 }
                 send.send(Some(FileSlice {
-                    block: block,
+                    block,
                     len: sz + last_left_len,
                     index: block_count,
                     filename: currfilename.to_string(),
-					sub_grps: file_subgrps.clone(),
+					sub_grps: file_subgrps.to_vec(),
                 }))?;
                 status.bytes.fetch_add(sz, Ordering::Relaxed);
                 bytes += sz;
@@ -315,11 +309,11 @@ pub fn io_thread_slicer(
                     eprintln!("sending found EOL at {} ", end + 1);
                 }
                 send.send(Some(FileSlice {
-                    block: block,
+                    block,
                     len: end + 1,
                     index: block_count,
                     filename: currfilename.to_string(),
-					sub_grps: file_subgrps.clone(),
+					sub_grps: file_subgrps.to_vec(),
                 }))?;
                 status.bytes.fetch_add(end + 1, Ordering::Relaxed);
                 bytes += end + 1;
@@ -329,11 +323,11 @@ pub fn io_thread_slicer(
                 eprintln!("sending tail len {} on file: {} ", left_len, currfilename);
             }
             send.send(Some(FileSlice {
-                block: block,
+                block,
                 len: left_len,
                 index: block_count,
                 filename: currfilename.to_string(),
-				sub_grps: file_subgrps.clone(),
+				sub_grps: file_subgrps.to_vec(),
             }))?;
             bytes += left_len;
             status.bytes.fetch_add(left_len, Ordering::Relaxed);
@@ -433,4 +427,23 @@ pub fn per_file_thread(
             Err(err) => eprintln!("error io slicing {}, error: {}", &filename.display(), err),
         }
     }
+}
+
+
+#[cfg(target_os = "linux")]
+pub fn get_reader_writer() -> (impl BufRead, impl Write) {
+    use std::os::unix::io::FromRawFd;
+    let stdin = unsafe { File::from_raw_fd(0) };
+    let stdout = unsafe { File::from_raw_fd(1) };
+    let (reader, writer) = (BufReader::new(stdin), BufWriter::new(stdout));
+    (reader, writer)
+}
+#[cfg(target_os = "windows")]
+pub fn get_reader_writer() -> (impl BufRead, impl Write) {
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    let stdin = unsafe { File::from_raw_handle(std::io::stdin().as_raw_handle()) };
+    let stdout = unsafe { File::from_raw_handle(std::io::stdout().as_raw_handle()) };
+
+    let (mut reader, mut writer) = (BufReader::new(stdin), BufWriter::new(stdout));
+    (reader, writer)
 }

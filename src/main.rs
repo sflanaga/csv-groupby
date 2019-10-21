@@ -8,7 +8,6 @@ use regex::{CaptureLocations, Regex};
 use std::alloc::System;
 use std::{
     cmp::Ordering,
-    collections::{HashSet, HashMap, BTreeMap},
     io::prelude::*,
     path::PathBuf,
     sync::{
@@ -18,19 +17,6 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-use fnv::FnvHashMap;
-
-//type MyMap = BTreeMap<String, KeySum>;
-//type MyMap = HashMap<String, KeySum>;
-type MyMap = FnvHashMap<String, KeySum>;
-
-
-fn create_map<K,V>() -> FnvHashMap<K,V>
-    where
-        K: Eq + Hash,
-{
-    FnvHashMap::with_capacity_and_hasher(1000, Default::default())
-}
 
 mod cli;
 mod gen;
@@ -40,7 +26,8 @@ mod testre;
 use cli::{get_cli, CliCfg};
 use colored::Colorize;
 use cpu_time::ProcessTime;
-use gen::{distro_format, io_thread_slicer, mem_metric_digit, per_file_thread, FileSlice, IoSlicerStatus};
+use gen::{distro_format, io_thread_slicer, mem_metric_digit, per_file_thread, FileSlice, IoSlicerStatus, get_reader_writer};
+
 use ignore::WalkBuilder;
 use testre::testre;
 
@@ -52,17 +39,19 @@ use std::io::BufReader;
 use std::cmp::Ordering::{Less, Greater, Equal};
 use std::hash::{BuildHasher, Hash};
 
-//pub static GLOBAL_TRACKER: std::alloc::System = std::alloc::System;
 //pub static GLOBAL_TRACKER: System = System; //CounterAtomicUsize = CounterAtomicUsize;
 #[cfg(target_os = "linux")]
 #[global_allocator]
-//pub static GLOBAL_TRACKER: CounterTlsToAtomicUsize = CounterTlsToAtomicUsize;
 pub static GLOBAL_TRACKER: jemallocator::Jemalloc = jemallocator::Jemalloc;
+//pub static GLOBAL_TRACKER: std::alloc::System = std::alloc::System;
+//pub static GLOBAL_TRACKER: CounterTlsToAtomicUsize = CounterTlsToAtomicUsize;
 
 #[cfg(target_os = "windows")]
 #[global_allocator]
 pub static GLOBAL_TRACKER: CounterTlsToAtomicUsize = CounterTlsToAtomicUsize;
 
+// null char is the BEST field terminator in-the-world but sadly few use it anymore
+const KEY_DEL: char = '\0';
 #[derive(Debug)]
 struct KeySum {
     count: u64,
@@ -88,7 +77,18 @@ impl KeySum {
     }
 }
 
-// main/cli/csv thread-spawn read->thread  { spawn block { re | csv } }
+// what type of xMap are we using today???
+use std::collections::{HashMap,BTreeMap};
+//use seahash::SeaHasher;
+//use fnv::FnvHashMap;
+//use fxhash::FxHashMap;
+type MyMap = BTreeMap<String, KeySum>;
+//type MyMap = FnvHashMap<String, KeySum>;
+//type MyMap = FxHashMap<String, KeySum>;
+fn create_map() -> MyMap
+{
+    MyMap::default()//(1000, SeaHasher::default())
+}
 
 fn main() {
     if let Err(err) = csv() {
@@ -97,26 +97,34 @@ fn main() {
     }
 }
 
-fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>, send: &crossbeam_channel::Sender<Option<FileSlice>>) {
+fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>, send: &crossbeam_channel::Sender<Option<FileSlice>>) {
     let start_f = Instant::now();
     let startcpu = ProcessTime::now();
+
+    let (sleeptime, return_or_not) = if verbosity > 0 {
+        // slower ticket when verbose output is on and newlines
+        (1000, "\n")
+    } else {
+        // action ticket if not other output on
+        (250, "                          \r")
+    };
     loop {
-        thread::sleep(Duration::from_millis(250));
+        thread::sleep(Duration::from_millis(sleeptime));
         if thread_stopper.load(Relaxed) {
             break;
         }
         let total_bytes = status.bytes.load(std::sync::atomic::Ordering::Relaxed);
         let elapsed = start_f.elapsed();
-        let sec: f64 = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
+        let sec: f64 = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1_000_000_000.0);
         let rate = (total_bytes as f64 / sec) as usize;
         let elapsedcpu: Duration = startcpu.elapsed();
-        let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
+        let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1_000_000_000.0);
         {
             let curr_file = status.curr_file.lock().unwrap();
             eprint!(
                 "{}",
                 format!(
-                    " q: {}  {}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}  mem: {}                    \r",
+                    " q: {}  {}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}  mem: {}{}",
                     send.len(),
                     mem_metric_digit(total_bytes, 4),
                     mem_metric_digit(rate, 4),
@@ -124,15 +132,17 @@ fn stat_ticker(thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>
                     seccpu,
                     curr_file,
                     mem_metric_digit(GLOBAL_TRACKER.get_alloc(), 4),
+                    return_or_not
                 )
-                .green()
+                    .green()
             );
         }
     }
     eprint!("                                                                             \r");
 }
+
 fn type_name_of<T: core::any::Any>(_t: &T) -> &str {
-    return std::any::type_name::<T>();
+    std::any::type_name::<T>()
 }
 
 fn csv() -> Result<(), Box<dyn std::error::Error>> {
@@ -158,10 +168,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         testre(&cfg)?;
         return Ok(());
     }
-    use fnv::FnvHashMap;
-    let mut main_map = create_map();
     if cfg.verbose >= 1 {
-        eprintln!("map type: {}", type_name_of(&main_map));
+        eprintln!("map type: {}", type_name_of(&MyMap::default()));
     }
 
     /////////////////////////////////////////////////////////////////////////////////////////////////
@@ -170,7 +178,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let (send_fileslice, recv_fileslice): (crossbeam_channel::Sender<Option<FileSlice>>, crossbeam_channel::Receiver<Option<FileSlice>>) =
         crossbeam_channel::bounded(cfg.thread_qsize);
 
-    let do_stdin = cfg.files.len() <= 0 && cfg.walk.is_none();
+    let do_stdin = cfg.files.is_empty() && cfg.walk.is_none();
     let mut io_status = Arc::new(IoSlicerStatus::new());
     let block_size = match cfg.block_size_b {
         0 => cfg.block_size_k * 1024,
@@ -218,7 +226,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         let clone_send_fileslice = send_fileslice.clone();
         let clone_recv_blocks = recv_blocks.clone();
         let io_status_cloned = io_status.clone();
-        let path_re:Option<Regex_pre2> = clone_cfg.re_path.as_ref().map_or(None, |x| Some(Regex_pre2::new(&x).unwrap()));
+        let path_re: Option<Regex_pre2> = clone_cfg.re_path.as_ref().and_then(|x| Some(Regex_pre2::new(&x).unwrap()));
         let h = thread::Builder::new()
             .name(format!("worker_io{}", no_threads))
             .spawn(move || {
@@ -247,8 +255,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         if do_ticker {
             let mut io_status_cloned = io_status.clone();
             let clone_send = send_fileslice.clone();
-
-            Some(thread::spawn(move || stat_ticker(thread_stopper, &mut io_status_cloned, &clone_send)))
+            let verbose = cfg.verbose;
+            Some(thread::spawn(move || stat_ticker(verbose, thread_stopper, &mut io_status_cloned, &clone_send)))
         } else {
             None
         }
@@ -276,12 +284,12 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         )?;
         total_bytes += bytes;
         total_blocks += blocks;
-    } else if cfg.files.len() > 0 {
+    } else if !cfg.files.is_empty() {
         let filelist = &cfg.files;
         for path in filelist {
             send_pathbuff
                 .send(Some(path.clone()))
-                .expect(&format!("Unable to send path: {} to path queue", path.display()));
+                .unwrap_or_else(|_| eprintln!("Unable to send path: {} to path queue", path.display()));
         }
     } else if cfg.walk.is_some() {
         let root = PathBuf::from(cfg.walk.as_ref().unwrap());
@@ -327,9 +335,14 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         total_fieldcount += fieldcount;
         all_the_maps.push(map);
     }
-    if !cfg.no_output {
-        sum_maps(&mut main_map, all_the_maps, cfg.verbose);
-    }
+    let main_map = if !cfg.no_output {
+        sum_maps(&mut all_the_maps, cfg.verbose)
+    } else {
+        create_map()
+    };
+
+    if cfg.verbose > 0 { eprintln!("dropping other maps"); }
+    all_the_maps.clear();
 
     stopper.swap(true, Relaxed);
 
@@ -339,8 +352,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
     // restore indexes to users input - really just makes testing slightly easier
     fn re_mod_idx<T>(_cfg: &CliCfg, v: T) -> T
-    where
-        T: std::ops::Sub<Output = T> + std::ops::Add<Output = T> + From<usize>,
+        where
+            T: std::ops::Sub<Output=T> + std::ops::Add<Output=T> + From<usize>,
     {
         (v + 1.into())
     }
@@ -351,6 +364,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let startout = Instant::now();
 
     let mut thekeys: Vec<_> = main_map.keys().clone().collect();
+
+    // may add other comparisons but for now - if ON just this one
     let chosen_cmp = {
         // partially taken from:
         // https://github.com/DanielKeep/rust-scan-rules/blob/master/src/input.rs#L610-L620
@@ -363,16 +378,15 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     (Some(a), Some(b)) => {
                         let x = a.cmp(&b);
                         if x == Equal { continue; } else { return x; }
-                    },
+                    }
                     (None, None) => return Equal,
                     (Some(_), None) => return Greater, // "aaa" will appear before "aaaz"
                     (None, Some(_)) => return Less,
                 }
             }
         }
-
-        let cmp_f64_str = |l_k: &&str, r_k: &&str| -> Ordering {
-            for (l, r) in l_k.split('|').zip(r_k.split('|')) {
+        |l_k: &&str, r_k: &&str| -> Ordering {
+            for (l, r) in l_k.split(KEY_DEL).zip(r_k.split(KEY_DEL)) {
                 let res: Ordering = {
                     // compare as numbers if you can
                     let lf = l.parse::<f64>();
@@ -393,16 +407,15 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 } // else keep going if this level is equal
             }
             Equal
-        };
-        cmp_f64_str
+        }
     };
     if !cfg.disable_key_sort {
         let cpu_keysort_s = ProcessTime::now();
         thekeys.sort_unstable_by(|l, r| { chosen_cmp(&l.as_str(), &r.as_str()) });
-        if cfg.verbose > 1 {
+        if cfg.verbose > 0 {
             let elapsedcpu: Duration = cpu_keysort_s.elapsed();
-            let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
-            eprintln!("sort cpu time {:.3}s of {} entries", seccpu, thekeys.len());
+            let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1_000_000_000.0);
+            eprintln!("sort cpu time {:.3}s for {} entries", seccpu, thekeys.len());
         }
     }
 
@@ -437,8 +450,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
             for ff in thekeys.iter() {
                 let mut vcell = vec![];
-                ff.split('|').for_each(|x| {
-                    if x.len() <= 0 {
+                ff.split(KEY_DEL).for_each(|x| {
+                    if x.len() == 0 {
                         vcell.push(Cell::new(&cfg.empty));
                     } else {
                         vcell.push(Cell::new(&x));
@@ -453,7 +466,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     vcell.push(Cell::new(&format!("{}", x)));
                 }
                 for x in &cc.avgs {
-                    if x.1 <= 0 {
+                    if x.1 == 0 {
                         vcell.push(Cell::new("unknown"));
                     } else {
                         vcell.push(Cell::new(&format!("{}", (x.0 / (x.1 as f64)))));
@@ -469,59 +482,71 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 let row = Row::new(vcell);
                 celltable.borrow_mut().add_row(row);
             }
+            let stdout = std::io::stdout();
+            let _writerlock = stdout.lock();
+            let (_reader, mut writer) = get_reader_writer();
 
-            celltable.borrow_mut().printstd();
+            celltable.borrow_mut().print(&mut writer)?;
         } else {
+            let stdout = std::io::stdout();
+            let _writerlock = stdout.lock();
+            let (_reader, mut writer) = get_reader_writer();
+
+            let mut line_out = String::with_capacity(180);
             {
-                let mut vcell = vec![];
                 if cfg.key_fields.len() > 0 {
                     for x in &cfg.key_fields {
-                        vcell.push(format!("k:{}", re_mod_idx(&cfg, *x)));
+                        line_out.push_str(&format!("k:{}", re_mod_idx(&cfg, *x)));
                     }
                 } else {
-                    vcell.push("k:-".to_string());
+                    line_out.push_str(&format!("{}k:-", &cfg.od));
                 }
                 if !cfg.no_record_count {
-                    vcell.push("count".to_string());
+                    line_out.push_str(&format!("{}count", &cfg.od));
                 }
                 for x in &cfg.sum_fields {
-                    vcell.push(format!("s:{}", re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}s:{}", &cfg.od, re_mod_idx(&cfg, *x)));
                 }
                 for x in &cfg.avg_fields {
-                    vcell.push(format!("a:{}", re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}a:{}", &cfg.od, re_mod_idx(&cfg, *x)));
                 }
                 for x in &cfg.unique_fields {
-                    vcell.push(format!("u:{}", re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}u:{}", &cfg.od, re_mod_idx(&cfg, *x)));
                 }
-                println!("{}", vcell.join(&cfg.od));
+                line_out.push('\n');
+                writer.write_all(&line_out.as_bytes())?;
             }
             for ff in thekeys.iter() {
-                let mut vcell = vec![];
-                ff.split('|').for_each(|x| {
-                    if x.len() <= 0 {
-                        vcell.push(format!("{}", cfg.empty));
+                line_out.clear();
+                let keyv: Vec<&str> = ff.split(KEY_DEL).collect();
+                for i in 0..keyv.len() {
+                    if keyv[i].len() == 0 {
+                        line_out.push_str(&cfg.empty);
                     } else {
-                        vcell.push(x.to_string());
+                        line_out.push_str(&keyv[i]);
                     }
-                });
+                    if i < keyv.len() - 1 { line_out.push_str(&cfg.od); }
+                }
                 let cc = main_map.get(*ff).unwrap();
                 if !cfg.no_record_count {
-                    vcell.push(format!("{}", cc.count));
+                    line_out.push_str(&format!("{}{}", &cfg.od, cc.count));
                 }
                 for x in &cc.sums {
-                    vcell.push(format!("{}", x));
+                    line_out.push_str(&format!("{}{}", &cfg.od, x));
                 }
                 for x in &cc.avgs {
-                    vcell.push(format!("{}", x.0 / (x.1 as f64)));
+                    line_out.push_str(&format!("{}{}", &cfg.od, x.0 / (x.1 as f64)));
                 }
                 for i in 0usize..cc.distinct.len() {
                     if cfg.write_distros.contains(&cfg.unique_fields[i]) {
-                        vcell.push(format!("{}", distro_format(&cc.distinct[i], cfg.write_distros_upper, cfg.write_distros_bottom)));
+                        line_out.push_str(&cfg.od);
+                        line_out.push_str(&distro_format(&cc.distinct[i], cfg.write_distros_upper, cfg.write_distros_bottom));
                     } else {
-                        vcell.push(format!("{}", &cc.distinct[i].len()));
+                        line_out.push_str(&format!("{}{}", &cfg.od, cc.distinct[i].len()));
                     }
                 }
-                println!("{}", vcell.join(&cfg.od));
+                line_out.push('\n');
+                writer.write_all(&line_out.as_bytes())?;
             }
         }
     }
@@ -532,10 +557,10 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     }
     if cfg.verbose >= 1 || cfg.stats {
         let elapsed = start_f.elapsed();
-        let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1000_000_000.0);
+        let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1_000_000_000.0);
         let rate: f64 = (total_bytes as f64) as f64 / sec;
         let elapsedcpu: Duration = startcpu.elapsed();
-        let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1000_000_000.0);
+        let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1_000_000_000.0);
         eprintln!(
             "read: {}  blocks: {}  rows: {}  fields: {}  rate: {}/s  time: {:.3}  cpu: {:.3}  mem: {}",
             mem_metric_digit(total_bytes, 5),
@@ -554,7 +579,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 fn worker_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
     // return lines / fields
     match _worker_re(&send_blocks, cfg, recv) {
-        Ok((map, lines, fields)) => return (map, lines, fields),
+        Ok((map, lines, fields)) => (map, lines, fields),
         Err(e) => {
             let err_msg = format!("Unable to process inner file - likely compressed or not UTF8 text: {}", e);
             panic!(err_msg);
@@ -660,7 +685,7 @@ fn _worker_re(
 
 fn worker_csv(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
     match _worker_csv(&send_blocks, cfg, recv) {
-        Ok((map, lines, fields)) => return (map, lines, fields),
+        Ok((map, lines, fields)) => (map, lines, fields),
         Err(e) => {
             let err_msg = format!("Unable to process inner block - likely compressed or not UTF8 text: {}", e);
             panic!(err_msg);
@@ -705,7 +730,7 @@ fn _worker_csv(
 //                    let mut v: Vec<&str> = Vec::with_capacity(record.len() + fc.sub_grps.len());
                     fc.sub_grps.iter().map(|x| x.as_str()).chain(record.iter())
                       .for_each(|x| v.push(x)); //
-                    if cfg.verbose > 2 { eprintln!("DBG WITH FILE PASTS VEC: {:?}", v);}
+                    if cfg.verbose > 2 { eprintln!("DBG WITH FILE PASTS VEC: {:?}", v); }
                     fieldcount += store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
                     v.clear();
                 }
@@ -726,13 +751,14 @@ fn _worker_csv(
 fn worker_multi_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
     // return lines / fields
     match _worker_multi_re(&send_blocks, cfg, recv) {
-        Ok((map, lines, fields)) => return (map, lines, fields),
+        Ok((map, lines, fields)) => (map, lines, fields),
         Err(e) => {
             let err_msg = format!("Unable to process inner file - likely compressed or not UTF8 text: {}", e);
             panic!(err_msg);
         }
     }
 }
+
 fn reused_str_vec(idx: usize, v: &mut Vec<String>, s: &str) {
     if idx < v.len() {
         v[idx].clear();
@@ -793,7 +819,7 @@ fn _worker_multi_re(
                 break;
             }
         };
-        if fc.index <= 0 {
+        if fc.index == 0 {
             re_curr_idx = 0;
             for s in &mut acc_record {
                 s.clear();
@@ -821,9 +847,9 @@ fn _worker_multi_re(
                     }
                     re_curr_idx += 1;
                     if re_curr_idx >= re_es.len() {
-                        let mut v: Vec<&str> = Vec::with_capacity(acc_record.len()+fc.sub_grps.len());
-                        fc.sub_grps.iter().map(|x| x.as_str()).chain(acc_record.iter().map(|x|x.as_str()))
-                            .for_each(|x| v.push(x)); //
+                        let mut v: Vec<&str> = Vec::with_capacity(acc_record.len() + fc.sub_grps.len());
+                        fc.sub_grps.iter().map(|x| x.as_str()).chain(acc_record.iter().map(|x| x.as_str()))
+                          .for_each(|x| v.push(x)); //
 
 
                         fieldcount += store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
@@ -851,9 +877,9 @@ fn _worker_multi_re(
 }
 
 fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> usize
-where
-    T: std::ops::Index<usize> + std::fmt::Debug,
-    <T as std::ops::Index<usize>>::Output: AsRef<str>,
+    where
+        T: std::ops::Index<usize> + std::fmt::Debug,
+        <T as std::ops::Index<usize>>::Output: AsRef<str>,
 {
     //let mut ss: String = String::with_capacity(256);
     ss.clear();
@@ -876,10 +902,10 @@ where
             } else {
                 ss.push_str("NULL");
             }
-            ss.push('|');
+            ss.push(KEY_DEL as char);
         }
         ss.pop(); // remove the trailing | instead of check each iteration
-                  // we know we get here because of the if above.
+        // we know we get here because of the if above.
     } else {
         ss.push_str("NULL");
     }
@@ -952,8 +978,11 @@ where
     fieldcount
 }
 
-fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
+fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize) -> MyMap {
     let start = Instant::now();
+    let lens = join(maps.iter().map(|x| x.len().to_string()), ",");
+    let mut p_map = maps.remove(0);
+    use itertools::join;
     for i in 0..maps.len() {
         for (k, v) in maps.get(i).unwrap() {
             let v_new = p_map.entry(k.to_string()).or_insert(KeySum::new(v.sums.len(), v.distinct.len(), v.avgs.len()));
@@ -983,8 +1012,8 @@ fn sum_maps(p_map: &mut MyMap, maps: Vec<MyMap>, verbose: usize) {
     let end = Instant::now();
     let dur = end - start;
     if verbose > 0 {
-        use itertools::join;
-        eprintln!("merge maps time: {:.3}s from map lens [{}] to single {}", dur.as_millis() as f64 / 1000.0f64,
-                 join(maps.iter().map(|x| x.len().to_string()), ","), p_map.len());
+        eprintln!("merge maps time: {:.3}s from map entry counts: [{}] to single map {} entries", dur.as_millis() as f64 / 1000.0f64,
+                  lens, p_map.len());
     }
+    p_map
 }
