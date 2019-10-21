@@ -11,7 +11,7 @@ documentation="https://github.com/sflanaga/csv-groupby"
 repository="https://github.com/sflanaga/csv-groupby"
 license = "Unlicense OR MIT"
 readme="README.md"
-keywords=["report", "text", "sql", "grep", "csv", "regex"]
+keywords=["report", "text", "sql", "csv", "regex"]
 
 [profile.dev]
 panic = 'abort'
