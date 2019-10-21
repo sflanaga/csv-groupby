@@ -14,12 +14,21 @@ use std::sync::Arc;
 use std::cmp::{Ordering::*, Ord, Ordering};
 
 pub mod gen;
-
+use gen::distro_format;
 fn main() {
-    if let Err(e) = sort_parse_key() {
+    if let Err(e) = test_distro() {
         println!("Application error: {}", e);
         std::process::exit(1);
     }
+}
+
+fn test_distro()  -> Result<(), std::io::Error> {
+    let mut h: HashMap<String, usize> = HashMap::new();
+    h.insert("c".to_string(), 100);
+    h.insert("a".to_string(), 100);
+
+    println!("{:#?}\n{}", h, distro_format(&h, 10,10));
+    Ok(())
 }
 
 /*

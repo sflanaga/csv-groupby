@@ -24,7 +24,8 @@ where
         // we do the extra ordering here to get predictable results
         // for testing and for user sanity
         if ev == core::cmp::Ordering::Equal {
-            y.1.cmp(&y.1)
+            // println!("having the compare {} {}", y.1, x.1);
+            x.1.cmp(&y.1)
         } else {
             ev
         }

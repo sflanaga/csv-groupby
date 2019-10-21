@@ -67,6 +67,19 @@ mod tests {
 9,200,201600,9,100
 ";
 
+    static EXPECTED_OUT_TABLE_DISTROS: &str = "k:1,count,u:3
+0,99,(100 x 1)(1000 x 1)..95..(9800 x 1)(9900 x 1)
+1,100,(10 x 1)(1010 x 1)..96..(9810 x 1)(9910 x 1)
+2,100,(1020 x 1)(1120 x 1)..96..(9820 x 1)(9920 x 1)
+3,100,(1030 x 1)(1130 x 1)..96..(9830 x 1)(9930 x 1)
+4,100,(1040 x 1)(1140 x 1)..96..(9840 x 1)(9940 x 1)
+5,100,(1050 x 1)(1150 x 1)..96..(9850 x 1)(9950 x 1)
+6,100,(1060 x 1)(1160 x 1)..96..(9860 x 1)(9960 x 1)
+7,100,(1070 x 1)(1170 x 1)..96..(9870 x 1)(9970 x 1)
+8,100,(1080 x 1)(1180 x 1)..96..(9880 x 1)(9980 x 1)
+9,100,(1090 x 1)(1190 x 1)..96..(990 x 1)(9990 x 1)
+";
+
     fn stdin_test_driver(args: &str, input: &str, expected_output: &'static str) -> Result<(), Box<dyn std::error::Error>> {
         println!("stdin test pre {}", args);
         let mut cmd: Command = Command::cargo_bin("gb")?;
@@ -94,8 +107,8 @@ mod tests {
         // if input.len() > 0 {
         //     eprintln!("Input  : {}...", &input[0..512]);
         // }
-        println!("Results:  {}<<END", &String::from_utf8_lossy(&output.stdout)[..]);
-        println!("Expected: {}<<END", expected_output);
+        println!("Results:  >>{}<<END", &String::from_utf8_lossy(&output.stdout)[..]);
+        println!("Expected: >>{}<<END", expected_output);
         assert_eq!(expected_output, &String::from_utf8_lossy(&output.stdout));
         assert_eq!(true, predicate_fn.eval(&String::from_utf8_lossy(&output.stdout)));
         println!("it {:?}", predicate_fn.find_case(true, &String::from_utf8_lossy(&output.stdout)));
@@ -149,6 +162,15 @@ mod tests {
             "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 1 -s 4 -u 2 -a 1 -c -n 4 --block_size_B 20",
             &INPUT_SET_1_WITH_FINAL_NEWLINE,
             EXPECTED_OUT1,
+        )
+    }
+
+    #[test]
+    fn write_distros() -> Result<(), Box<dyn std::error::Error>> {
+        stdin_test_driver(
+            "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 1 -u 3 --write_distros 3 --write_distros_upper 2 --write_distros_bottom 2 -c",
+            &INPUT_SET_1_WITH_FINAL_NEWLINE,
+            &EXPECTED_OUT_TABLE_DISTROS,
         )
     }
 
