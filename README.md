@@ -49,7 +49,7 @@ Running the command:
 gb -f 2008.csv -k 2,9 -s 14 --skip_header -c | head -10
 ```
 
-Here this command corresponds to the SQL:
+How this command corresponds to the SQL:
 ```
 select Month, UniqueCarrier, count(*), sum(AirTime) from csv group by Month, UniqueCarrier
        ^              ^                     ^
