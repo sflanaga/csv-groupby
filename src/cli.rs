@@ -99,7 +99,7 @@ pub struct CliCfg {
 
     #[structopt(short = "d", long = "input_delimiter", name = "delimiter", default_value = ",")]
     /// Delimiter if in csv mode
-    pub delimiter: char,
+    pub delimiter: String,
 
     #[structopt(short = "o", long = "output_delimiter", name = "outputdelimiter", default_value = ",")]
     /// Output delimiter for written summaries
@@ -213,6 +213,13 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
         fn re_map(v: usize) -> Result<usize> {
             if v == 0 { return Err("Field indices must start at base 1")?; }
             Ok(v-1)
+        }
+
+        if cfg.delimiter.len() > 1 {
+            cfg.delimiter = unescape::unescape(&cfg.delimiter).unwrap();
+            if cfg.delimiter.len() > 1 {
+                return Err("--input_delimiter is too long: must have length 1")?;
+            }
         }
 
         add_n_check(&mut cfg.key_fields, "-k")?;

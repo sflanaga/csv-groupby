@@ -704,7 +704,7 @@ fn _worker_csv(
 
     let mut builder = csv::ReaderBuilder::new();
     //let delimiter = dbg!(cfg.delimiter.expect("delimiter is malformed"));
-    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.skip_header).flexible(true);//.escape(Some(b'\\')).flexible(true).comment(Some(b'#'));
+    builder.delimiter(cfg.delimiter.chars().next().unwrap() as u8).has_headers(cfg.skip_header).flexible(true);//.escape(Some(b'\\')).flexible(true).comment(Some(b'#'));
 
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
