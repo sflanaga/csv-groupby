@@ -100,11 +100,9 @@ pub struct CliCfg {
     #[structopt(short = "d", long = "input_delimiter", name = "delimiter", default_value = ",")]
     /// Delimiter if in csv mode
     pub delimiter: String,
-
     #[structopt(short = "o", long = "output_delimiter", name = "outputdelimiter", default_value = ",")]
     /// Output delimiter for written summaries
     pub od: String,
-
     #[structopt(short = "c", long = "csv_output")]
     /// Write delimited output summary instead of auto-aligned table output
     pub csv_output: bool,
@@ -112,7 +110,6 @@ pub struct CliCfg {
     #[structopt(short = "v", parse(from_occurrences))]
     /// Verbosity - use more than one v for greater detail
     pub verbose: usize,
-
     #[structopt(long = "skip_header")]
     /// Skip the first (header) line of input for each file or all of stdin
     pub skip_header: bool,
