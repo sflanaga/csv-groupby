@@ -224,6 +224,31 @@ pub struct FileSlice {
 	pub sub_grps: Vec<String>,
 }
 
+fn fill_buff(handle: &mut dyn Read, buff: &mut [u8]) -> Result<usize, std::io::Error> {
+    // eprintln!("call fill");
+    let mut sz = handle.read(&mut buff[..])?;
+    // eprintln!("mid read: {}", sz);
+    loop {
+        if sz == 0 {
+            return Ok(sz);
+        } else if sz == buff.len() {
+            return Ok(sz);
+        }
+
+        let sz2 = handle.read(&mut buff[sz..])?;
+        // eprintln!("mid2 read: {}", sz2);
+
+        if sz2 == 0 {
+            return Ok(sz);
+        } else {
+            sz += sz2;
+        }
+    }
+
+}
+
+
+
 pub fn io_thread_slicer(
     recv_blocks: &crossbeam_channel::Receiver<Vec<u8>>,
     currfilename: &dyn Display,
@@ -259,7 +284,7 @@ pub fn io_thread_slicer(
         }
         let (expected_sz, sz) = {
             let expected_sz = block.len() - left_len;
-            let sz = handle.read(&mut block[left_len..])?;
+            let sz = fill_buff(handle, &mut block[left_len..])?; 
             (expected_sz, sz)
         };
 
