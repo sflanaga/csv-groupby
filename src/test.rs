@@ -20,16 +20,17 @@ mod tests {
     lazy_static! {
         static ref INPUT_SET_1_WITH_FINAL_NEWLINE: String = create_fake_input1(true);
         static ref INPUT_SET_1_NO_FINAL_NEWLINE: String = create_fake_input1(false);
+        static ref INPUT_SET_1_TAB_DELIMITED: String = create_fake_input_base(false, "\t".to_string());
     }
     use super::*;
 
-    fn create_fake_input1(final_newline: bool) -> String {
+    fn create_fake_input_base(final_newline: bool, delimiter: String) -> String {
         let mut input_str = String::new();
         for i in 1..1000 {
             let q = i % 10;
             let j = i * 10;
             let k = i as f64 * 2.0f64;
-            input_str.push_str(&format!("{},{},{},{}", q, i, j, k));
+            input_str.push_str(&format!("{}{d}{}{d}{}{d}{}", q, i, j, k, d = delimiter));
             if i < 999 {
                 input_str.push_str("\n");
             }
@@ -39,6 +40,10 @@ mod tests {
             input_str.push_str("\n");
         }
         input_str
+    }
+
+    fn create_fake_input1(final_newline: bool) -> String {
+        return create_fake_input_base(final_newline, ",".to_string());
     }
 
     static EXPECTED_OUT1: &str = "k:1,count,s:4,a:1,u:2
@@ -188,5 +193,10 @@ mod tests {
             "",
             EXPECTED_OUT2,
         )
+    }
+
+    #[test]
+    fn alternative_escaped_delimiter() -> Result<(), Box<dyn std::error::Error>> {
+        stdin_test_driver("-d \\t -k 1 -s 4 -u 2 -a 1 -c -n 1", &INPUT_SET_1_TAB_DELIMITED, EXPECTED_OUT1)
     }
 }
