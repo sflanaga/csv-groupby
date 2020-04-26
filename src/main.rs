@@ -79,6 +79,9 @@ impl KeySum {
 
 // what type of xMap are we using today???
 use std::collections::{HashMap,BTreeMap};
+use std::fs::File;
+use std::ffi::OsString;
+
 //use seahash::SeaHasher;
 //use fnv::FnvHashMap;
 //use fxhash::FxHashMap;
@@ -265,7 +268,25 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     //
     // FILE - setup feed by the source of data
     //
-    if do_stdin {
+    if cfg.stdin_file_list {
+        for fileline in std::io::stdin().lock().lines() {
+            let line = fileline.expect("Unable to read line from stdin");
+            let pathbuf = PathBuf::from(line);
+            send_pathbuff
+                .send(Some(pathbuf.clone()))
+                .unwrap_or_else(|_| eprintln!("Unable to send path: {} to path queue", pathbuf.display()));
+        }
+    } else if let Some(path) = &cfg.file_list {
+        let f = File::open(path).expect(format!("Unable to open file list file: {}", path.display()).as_str());
+        let f = BufReader::new(f);
+        for fileline in f.lines() {
+            let line = fileline.expect(format!("Unable to read line from {}", path.display()).as_str());
+            let pathbuf = PathBuf::from(line);
+            send_pathbuff
+                .send(Some(pathbuf.clone()))
+                .unwrap_or_else(|_| eprintln!("Unable to send path: {} to path queue", pathbuf.display()));
+        }
+    } else if do_stdin {
         eprintln!("{}", "<<< reading from stdin".red());
         let stdin = std::io::stdin();
         let mut handle = stdin; // .lock();

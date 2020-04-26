@@ -143,6 +143,14 @@ pub struct CliCfg {
     /// and possible related that might occurr
     pub block_size_b: usize,
 
+    #[structopt(short = "l", name = "file_list", parse(from_os_str), conflicts_with = "glob")]
+    /// file containing a list of input files
+    pub file_list: Option<PathBuf>,
+
+    #[structopt(short = "i", name = "stdin_file_list", conflicts_with = "glob")]
+    /// read a list of files to parse from stdin
+    pub stdin_file_list: bool,
+
     #[structopt(short = "f", name = "file", parse(from_os_str), conflicts_with = "glob")]
     /// list of input files, defaults to stdin
     pub files: Vec<PathBuf>,
