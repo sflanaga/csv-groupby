@@ -269,6 +269,7 @@ pub fn io_thread_slicer(
         curr_file.clear();
         curr_file.push_str(format!("{}", currfilename).as_str());
     }
+    status.files.fetch_add(1, Ordering::Relaxed);
 
     let mut block_count = 0;
     let mut bytes = 0;

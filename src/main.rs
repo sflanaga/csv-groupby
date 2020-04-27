@@ -117,6 +117,7 @@ fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, status: &mut A
             break;
         }
         let total_bytes = status.bytes.load(std::sync::atomic::Ordering::Relaxed);
+        let file_count = status.files.load(std::sync::atomic::Ordering::Relaxed);
         let elapsed = start_f.elapsed();
         let sec: f64 = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1_000_000_000.0);
         let rate = (total_bytes as f64 / sec) as usize;
@@ -127,8 +128,9 @@ fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, status: &mut A
             eprint!(
                 "{}",
                 format!(
-                    " q: {}  {}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}  mem: {}{}",
+                    " q: {}/{}  {}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}  mem: {}{}",
                     send.len(),
+                    file_count,
                     mem_metric_digit(total_bytes, 4),
                     mem_metric_digit(rate, 4),
                     sec,
