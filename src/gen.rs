@@ -247,8 +247,6 @@ fn fill_buff(handle: &mut dyn Read, buff: &mut [u8]) -> Result<usize, std::io::E
 
 }
 
-
-
 pub fn io_thread_slicer(
     recv_blocks: &crossbeam_channel::Receiver<Vec<u8>>,
     currfilename: &dyn Display,

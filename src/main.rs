@@ -582,10 +582,12 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         let elapsed = start_f.elapsed();
         let sec = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1_000_000_000.0);
         let rate: f64 = (total_bytes as f64) as f64 / sec;
+        let total_files = io_status.files.load(std::sync::atomic::Ordering::Relaxed);
         let elapsedcpu: Duration = startcpu.elapsed();
         let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1_000_000_000.0);
         eprintln!(
-            "read: {}  blocks: {}  rows: {}  fields: {}  rate: {}/s  time: {:.3}  cpu: {:.3}  mem: {}",
+            "files: {}  read: {}  blocks: {}  rows: {}  fields: {}  rate: {}/s  time: {:.3}  cpu: {:.3}  mem: {}",
+            total_files,
             mem_metric_digit(total_bytes, 5),
             total_blocks,
             total_rowcount,
