@@ -29,9 +29,6 @@ lazy_static! {
     //raw(setting = "structopt::clap::AppSettings::DeriveDisplayOrder"),
     author, about
 )]
-///
-/// Perform a sql-like group by on csv or arbitrary text files organized into lines.  You can use multiple regex entries to attempt to capture a record across multiple lines such as xml files, but this is very experiemental.
-///
 pub struct CliCfg {
     #[structopt(short = "R", long = "test_re", name = "testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield", "avgfield"])]
     /// Test a regular expression against strings - best surrounded by quotes
@@ -143,19 +140,19 @@ pub struct CliCfg {
     /// and possible related that might occurr
     pub block_size_b: usize,
 
-    #[structopt(short = "l", name = "file_list", parse(from_os_str), conflicts_with = "glob")]
+    #[structopt(short = "l", name = "file_list", parse(from_os_str), conflicts_with_all = &["walk", "stdin_file_list", "file"])]
     /// file containing a list of input files
     pub file_list: Option<PathBuf>,
 
-    #[structopt(short = "i", name = "stdin_file_list", conflicts_with = "glob")]
+    #[structopt(short = "i", name = "stdin_file_list", conflicts_with_all = &["walk", "file_list", "file"])]
     /// read a list of files to parse from stdin
     pub stdin_file_list: bool,
 
-    #[structopt(short = "f", name = "file", parse(from_os_str), conflicts_with = "glob")]
+    #[structopt(short = "f", name = "file", parse(from_os_str), conflicts_with_all = &["walk", "file_list", "stdin_file_list"])]
     /// list of input files, defaults to stdin
     pub files: Vec<PathBuf>,
 
-    #[structopt(short = "w", long = "walk", name = "walk", conflicts_with = "file")]
+    #[structopt(short = "w", long = "walk", name = "walk", conflicts_with_all = &["file", "file_list", "stdin_file_list"])]
     /// recursively walk a tree of files to parse
     pub walk: Option<String>,
 
@@ -178,17 +175,6 @@ pub struct CliCfg {
     /// they appear as numbers and as strings (ignoring case) otherwise like Excel
     /// would sort things
     pub disable_key_sort: bool,
-
-    // #[structopt(long = "exit_on_badblock")]
-    // /// Exit when there is an error within a block
-    // ///
-    // /// If a error occurrs during parsing a block, the process will write the error and block location
-    // /// and continue to process.  The block is skipped otherwise.
-    // /// But, this option will cause the whole process to exit when this happens
-    // pub exit_on_badblock: bool,
-    #[structopt(long = "stdin_filelist")]
-    /// NOT DONE - reads files named in stdin
-    pub stdin_filelist: bool,
 }
 
 fn add_n_check(indices:&mut Vec<usize>, comment: &str) -> Result<()> {

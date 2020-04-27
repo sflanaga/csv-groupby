@@ -271,6 +271,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     // FILE - setup feed by the source of data
     //
     if cfg.stdin_file_list {
+        if cfg.verbose >= 1 {
+            eprintln!("reading files to process from stdin");
+        }
         for fileline in std::io::stdin().lock().lines() {
             let line = fileline.expect("Unable to read line from stdin");
             let pathbuf = PathBuf::from(line);
@@ -279,6 +282,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|_| eprintln!("Unable to send path: {} to path queue", pathbuf.display()));
         }
     } else if let Some(path) = &cfg.file_list {
+        if cfg.verbose >= 1 {
+            eprintln!("reading files to process from file: {}", path.display());
+        }
         let f = File::open(path).expect(format!("Unable to open file list file: {}", path.display()).as_str());
         let f = BufReader::new(f);
         for fileline in f.lines() {
