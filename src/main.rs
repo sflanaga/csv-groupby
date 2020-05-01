@@ -524,9 +524,11 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             let mut line_out = String::with_capacity(180);
             {
                 if cfg.key_fields.len() > 0 {
+
                     for x in &cfg.key_fields {
-                        line_out.push_str(&format!("k:{}", re_mod_idx(&cfg, *x)));
+                        line_out.push_str(&format!("k:{}{}", re_mod_idx(&cfg, *x), &cfg.od));
                     }
+                    line_out.truncate(line_out.len()-1);
                 } else {
                     line_out.push_str(&format!("{}k:-", &cfg.od));
                 }
@@ -554,7 +556,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         line_out.push_str(&keyv[i]);
                     }
-                    if i < keyv.len() - 1 { line_out.push_str(&cfg.od); }
+                    if i < keyv.len()-1 { line_out.push_str(&cfg.od); }
                 }
                 let cc = main_map.get(*ff).unwrap();
                 if !cfg.no_record_count {

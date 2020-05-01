@@ -10,6 +10,7 @@ use std::sync::{
 use std::{fs, thread};
 use pcre2::bytes::{Captures as Captures_pcre2, Regex as Regex_pre2};
 use std::fs::File;
+use flate2::read::GzDecoder;
 
 pub fn distro_format<T,S>(map: &HashMap<T, usize, S>, upper: usize, bottom: usize) -> String
 where
@@ -427,12 +428,31 @@ pub fn per_file_thread(
             eprintln!("processing file: {}", filename.display());
         }
 
-        let mut rdr = match DecompressionReader::new(&filename) {
-            Ok(rdr) => rdr,
-            Err(err) => {
-                eprintln!("skipping file \"{}\", due to error: {}", filename.display(), err);
-                continue;
+        let ext = {
+            match filename.to_str().unwrap().rfind('.') {
+                None => String::from(""),
+                Some(i) => String::from(&filename.to_str().unwrap()[i..]),
             }
+        };
+        let mut rdr:Box<dyn Read> = match &ext[..] {
+            ".gz" => {
+                match File::open(&filename) {
+                    Ok(f) => Box::new(BufReader::new(GzDecoder::new(f))),
+                    Err(err) => {
+                        eprintln!("skipping file \"{}\", due to error: {}", filename.display(), err);
+                        continue;
+                    },
+                }
+            },
+            _ => {
+                match DecompressionReader::new(&filename) {
+                    Ok(rdr) => Box::new(rdr),
+                    Err(err) => {
+                        eprintln!("skipping file \"{}\", due to error: {}", filename.display(), err);
+                        continue;
+                    },
+                }
+            },
         };
         match io_thread_slicer(
             &recv_blocks,
