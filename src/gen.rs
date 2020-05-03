@@ -434,10 +434,27 @@ pub fn per_file_thread(
                 Some(i) => String::from(&filename.to_str().unwrap()[i..]),
             }
         };
-        let mut rdr:Box<dyn Read> = match &ext[..] {
+        let mut rdr:Box<Read> = match &ext[..] {
             ".gz" => {
                 match File::open(&filename) {
                     Ok(f) => Box::new(BufReader::new(GzDecoder::new(f))),
+                    Err(err) => {
+                        eprintln!("skipping file \"{}\", due to error: {}", filename.display(), err);
+                        continue;
+                    },
+                }
+            },
+            ".zst" => {
+                match File::open(&filename) {
+                    Ok(f) => {
+                        match zstd::stream::read::Decoder::new(f) {
+                            Ok(d) =>Box::new(BufReader::new(d)),
+                            Err(err) => {
+                                eprintln!("skipping file \"{}\", zstd decoder error: {}", filename.display(), err);
+                                continue;
+                            }
+                        }
+                    },
                     Err(err) => {
                         eprintln!("skipping file \"{}\", due to error: {}", filename.display(), err);
                         continue;
