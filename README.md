@@ -115,8 +115,9 @@ If you want to test how how a line of text and your regular expression interact 
 
 ## Help  `gb --help`
 ```
+csv-groupby 0.7.2
 Steve Flanagan
-sql group by on arbitrary text or csv files
+execute a sql-like group-by on arbitrary text or csv files
 
 USAGE:
     gb [FLAGS] [OPTIONS]
@@ -137,6 +138,9 @@ FLAGS:
         --noop_proc
             do no real work - used for testing IO
 
+    -i
+            read a list of files to parse from stdin
+
         --stats
             list of input files, defaults to stdin
 
@@ -151,9 +155,6 @@ FLAGS:
 
             The key sort used is special in that it attempts to sort the key numerically where they appear as numbers
             and as strings (ignoring case) otherwise like Excel would sort things
-        --stdin_filelist
-            NOT DONE - reads files named in stdin
-
     -h, --help
             Prints help information
 
@@ -203,7 +204,7 @@ OPTIONS:
             STDIO
     -C, --re_line_contains <re-line-contains>
             Gives a hint to regex mode to presearch a line before testing regex. This may speed up regex mode
-            significantly if the lines you match on are a minority to the whole.
+            significantly if the lines you match on are a minority to the whole
     -d, --input_delimiter <delimiter>
             Delimiter if in csv mode [default: ,]
 
@@ -214,10 +215,10 @@ OPTIONS:
             Empty string substitution - default is "" empty/nothing/notta [default: ]
 
     -n, --worker_threads <no-threads>
-            Number of csv or re parsing threads - defaults to up to 12 if you have that many CPUs [default: 4]
+            Number of csv or re parsing threads - defaults to up to 12 if you have that many CPUs [default: 12]
 
     -q, --queue_size <thread-qsize>
-            Length of queue between IO block reading and parsing threads [default: 16]
+            Length of queue between IO block reading and parsing threads [default: 48]
 
         --block_size_k <block-size-k>
             Size of the IO block "K" (1024 bytes) used between reading thread and parser threads [default: 256]
@@ -225,19 +226,22 @@ OPTIONS:
         --block_size_B <block-size-b>
             Block size for IO to queue used for testing really small blocks and possible related that might occurr
             [default: 0]
+    -l <file_list>
+            file containing a list of input files
+
     -f <file>...
             list of input files, defaults to stdin
 
     -w, --walk <walk>
             recursively walk a tree of files to parse
-
+            
+            
 TODO/ideas:  
 
 - More better readme - sometimes more is not better
 - More diverse unit testing
 - Oh musl, where for art thou musl?  Why your alloc so bad....
 - csv comment char
-- Use stdin as a filelist source in addition to stdin as a data source
 - more aggregates: min, max, empty_count, number_count, zero_count
   - avg and sum done
 - faster sort on mixed key fields before output
@@ -245,7 +249,5 @@ TODO/ideas:
 - do more work to multi-line re mode - not sure how it should really work yet
 > This does function and I have used it on well formed xml, but not sure it will be a thing or not.
 - flat mode - no summary but just write X fields to the output as found - a kind s/()..()..()/$1,$2,$3,.../;
-- ticker interval
-- ticker off
 - use RE find/search for matches instead of line bound interface?
 
