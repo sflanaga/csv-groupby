@@ -238,6 +238,8 @@ OPTIONS:
             
 TODO/ideas:  
 
+- Fix -i to also support -p option
+
 - More better readme - sometimes more is not better
 - More diverse unit testing
 - Oh musl, where for art thou musl?  Why your alloc so bad....
