@@ -233,11 +233,6 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
     // remove first map from list but keep / reuse it as a merge target
     let mut p_map = maps.remove(0);
     use itertools::join;
-    let mut count_new = 0;
-    let mut count_both_null_max = 0;
-    let mut count_ass1 = 0;
-    let mut count_ass2 = 0;
-    let mut count_else = 0;
     for i in 0..maps.len() {
         for (k, v) in maps.get_mut(i).unwrap() {
             let v_new = p_map.entry(k.to_string()).or_insert(
@@ -323,10 +318,6 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
         eprintln!("merge maps time: {:.3}s from map entry counts: [{}] to single map {} entries", dur.as_millis() as f64 / 1000.0f64,
                   lens, p_map.len());
     }
-
-    // println!("count new: {}", count_new);
-    // println!("count both null max: {}", count_both_null_max);
-    // println!("ass1/2 {}  {}  else: {}", count_ass1, count_ass2, count_else);
 
     p_map
 }
