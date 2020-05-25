@@ -5,6 +5,7 @@ use pcre2::bytes::Regex;
 
 use lazy_static::lazy_static;
 use structopt::StructOpt;
+use std::str::FromStr;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -31,7 +32,7 @@ lazy_static! {
 )]
 pub struct CliCfg {
     #[structopt(short = "R", long = "test_re", name = "testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield", "avgfield"])]
-    /// Test a regular expression against strings - best surrounded by quotes
+    /// Test a regular expression against strings - use shell quotes/escape for special stuff
     pub testre: Option<String>,
 
     #[structopt(short = "L", long = "test_line", name = "testline", requires="testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield", "avgfield"])]
@@ -62,9 +63,25 @@ pub struct CliCfg {
     /// Field to sum as float64s - base index 1
     pub sum_fields: Vec<usize>,
 
-    #[structopt(short = "a", long = "avg_values", name = "avgfield", use_delimiter(true), min_values(1))]
+    #[structopt(short = "a", long = "avg_values", name = "avg_fields", use_delimiter(true), min_values(1))]
     /// Field to average if parseable number values found - base index 1
     pub avg_fields: Vec<usize>,
+
+    #[structopt(short = "x", long = "max_nums", name = "max_num_fields", use_delimiter(true), min_values(1))]
+    /// Field to find max as float64s - base index 1
+    pub max_num_fields: Vec<usize>,
+
+    #[structopt(short = "n", long = "min_nums", name = "min_num_fields", use_delimiter(true), min_values(1))]
+    /// Field to find max as float64s - base index 1
+    pub min_num_fields: Vec<usize>,
+
+    #[structopt(short = "X", long = "max_strings", name = "max_str_fields", use_delimiter(true), min_values(1))]
+    /// Field to find max as string - base index 1
+    pub max_str_fields: Vec<usize>,
+
+    #[structopt(short = "N", long = "min_strings", name = "min_str_fields", use_delimiter(true), min_values(1))]
+    /// Field to find max as string - base index 1
+    pub min_str_fields: Vec<usize>,
 
     #[structopt(short = "r", long = "regex", conflicts_with = "delimiter")]
     /// Regex mode regular expression
@@ -79,13 +96,13 @@ pub struct CliCfg {
     /// RE to match again.
     pub re_str: Vec<String>,
 
-    #[structopt(short = "C", short = "p", long = "path_re")]
+    #[structopt(short = "p", long = "path_re")]
     /// Parse the path of the file to and process only those that match.
     /// If the matches have sub groups, then use those strings as parts to summarized.
     /// This works in CSV mode as well as Regex mode, but not while parsing STDIO
     pub re_path: Option<String>,
 
-    #[structopt(short = "C", long = "re_line_contains")]
+    #[structopt(long = "re_line_contains")]
     /// Gives a hint to regex mode to presearch a line before testing regex.
     /// This may speed up regex mode significantly if the lines you match on are a minority to the whole.
     pub re_line_contains: Option<String>,
@@ -94,14 +111,34 @@ pub struct CliCfg {
 //    /// Using whole regex match as 0th field - adds 1 to all others
 //    pub fullmatch_as_field: bool,
 
-    #[structopt(short = "d", long = "input_delimiter", name = "delimiter", default_value = ",")]
+    #[structopt(short = "d", long = "input_delimiter", name = "delimiter", parse(try_from_str = escape_parser), default_value = ",", conflicts_with_all = &["regex"])]
     /// Delimiter if in csv mode
+    /// Note:  \t == <tab>  \0 == <null>  \dVAL where VAL is decimal number for ascii from 0 to 127
+    ///
+    /// Did you know that you can escape tabs and other special characters?
+    /// bash use -d $'\t'
+    /// power shell use -d `t  note it's the other single quote
+    /// cmd.exe  use cmd.exe /f:off and type -d "<TAB>"
+    /// But \t \0 \d11 are there where 11
     pub delimiter: char,
+
+    #[structopt(short = "q", long = "quote", name = "quote", parse(try_from_str = escape_parser), conflicts_with_all = &["regex"])]
+    /// csv quote character for fields that might contain the delimiter
+    pub quote: Option<char>,
+
+    #[structopt(short = "e", long = "escape", name = "escape", requires="quote", parse(try_from_str = escape_parser), conflicts_with_all = &["regex"])]
+    /// csv escape character for the quote character
+    pub escape: Option<char>,
+
+    #[structopt(short = "C", long = "comment", name = "comment", parse(try_from_str = escape_parser), conflicts_with_all = &["regex"])]
+    /// csv escape character for the quote character
+    pub comment: Option<char>,
+
     #[structopt(short = "o", long = "output_delimiter", name = "outputdelimiter", default_value = ",")]
     /// Output delimiter for written summaries
     pub od: String,
     #[structopt(short = "c", long = "csv_output")]
-    /// Write delimited output summary instead of auto-aligned table output
+    /// Write delimited output summary instead of auto-aligned table output.  Use -o to change the delimiter.
     pub csv_output: bool,
 
     #[structopt(short = "v", parse(from_occurrences))]
@@ -115,15 +152,15 @@ pub struct CliCfg {
     /// Do not write counts for each group by key tuple
     pub no_record_count: bool,
 
-    #[structopt(short = "e", long = "empty_string", default_value = "")]
+    #[structopt(long = "empty_string", default_value = "")]
     /// Empty string substitution - default is "" empty/nothing/notta
     pub empty: String,
 
-    #[structopt(short = "n", long = "worker_threads", default_value(&DEFAULT_THREAD_NO))]
+    #[structopt(short = "t", long = "worker_threads", default_value(&DEFAULT_THREAD_NO))]
     /// Number of csv or re parsing threads - defaults to up to 12 if you have that many CPUs
     pub no_threads: u64,
 
-    #[structopt(short = "q", long = "queue_size", default_value(&DEFAULT_QUEUE_SIZE))]
+    #[structopt(long = "queue_size", default_value(&DEFAULT_QUEUE_SIZE))]
     /// Length of queue between IO block reading and parsing threads
     pub thread_qsize: usize,
 
@@ -157,7 +194,7 @@ pub struct CliCfg {
     pub walk: Option<String>,
 
     #[structopt(long = "stats")]
-    /// list of input files, defaults to stdin
+    /// write final stats after processing
     pub stats: bool,
 
     #[structopt(long = "no_output")]
@@ -175,6 +212,30 @@ pub struct CliCfg {
     /// they appear as numbers and as strings (ignoring case) otherwise like Excel
     /// would sort things
     pub disable_key_sort: bool,
+
+    #[structopt(long = "null_write", name = "nullstring", default_value="NULL")]
+    /// What to write when we do not have a value at all.  null = I do not know
+    pub null: String,
+}
+
+fn escape_parser(s: &str) -> Result<char> {
+    if s.starts_with("\\d") {
+        match u8::from_str(&s[2..]) {
+            Ok(v) if v <= 127 => Ok(v as char),
+            _ => Err(format!("Expect delimiter escape decimal to a be a number between 0 and 127 but got: \"{}\"", &s[2..]))?,
+        }
+    } else {
+        match s {
+            "\\t" => Ok('\t'),
+            "\\0" => Ok('\0'),
+            _ => {
+                if s.len() != 1 {
+                    Err(format!("Delimiter not understood - must be 1 character OR \\t or \\0 or \\d<dec num>"))?
+                }
+                Ok(s.chars().next().unwrap())
+            },
+        }
+    }
 }
 
 fn add_n_check(indices:&mut Vec<usize>, comment: &str) -> Result<()> {
@@ -209,6 +270,12 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
         add_n_check(&mut cfg.key_fields, "-k")?;
         add_n_check(&mut cfg.sum_fields, "-s")?;
         add_n_check(&mut cfg.avg_fields, "-a")?;
+
+        add_n_check(&mut cfg.max_num_fields, "-x")?;
+        add_n_check(&mut cfg.max_str_fields, "-X")?;
+        add_n_check(&mut cfg.min_num_fields, "-n")?;
+        add_n_check(&mut cfg.min_str_fields, "-N")?;
+
         add_n_check(&mut cfg.unique_fields, "-u")?;
         add_n_check(&mut cfg.write_distros, "--write_distros")?;
 

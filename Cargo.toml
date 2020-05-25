@@ -81,4 +81,4 @@ zstd = "0.5.1+zstd.1.4.4"
 
 assert_cmd = "0.10"
 predicates = "1"
-
+backtrace = "0.3.46"

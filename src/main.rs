@@ -22,6 +22,8 @@ mod cli;
 mod gen;
 mod mem;
 mod testre;
+mod keysum;
+
 
 use cli::{get_cli, CliCfg};
 use colored::Colorize;
@@ -52,46 +54,28 @@ pub static GLOBAL_TRACKER: CounterTlsToAtomicUsize = CounterTlsToAtomicUsize;
 
 // null char is the BEST field terminator in-the-world but sadly few use it anymore
 const KEY_DEL: char = '\0';
-#[derive(Debug)]
-struct KeySum {
-    count: u64,
-    sums: Vec<f64>,
-    avgs: Vec<(f64, usize)>,
-    distinct: Vec<HashMap<String, usize>>,
-}
 
-impl KeySum {
-    pub fn new(sum_len: usize, dist_len: usize, avg_len: usize) -> KeySum {
-        KeySum {
-            count: 0,
-            sums: vec![0f64; sum_len],
-            avgs: vec![(0f64, 0usize); avg_len],
-            distinct: {
-                let mut v = Vec::with_capacity(dist_len);
-                for _ in 0..dist_len {
-                    v.push(HashMap::new());
-                }
-                v
-            },
-        }
-    }
-}
 
 // what type of xMap are we using today???
-use std::collections::{HashMap,BTreeMap};
+use std::collections::{HashMap, BTreeMap};
 use std::fs::File;
 use std::ffi::OsString;
+use crate::keysum::{sum_maps, store_rec};
 
 //use seahash::SeaHasher;
 //use fnv::FnvHashMap;
 //use fxhash::FxHashMap;
-type MyMap = BTreeMap<String, KeySum>;
+
 //type MyMap = FnvHashMap<String, KeySum>;
 //type MyMap = FxHashMap<String, KeySum>;
 fn create_map() -> MyMap
 {
     MyMap::default()//(1000, SeaHasher::default())
 }
+
+type MyMap = BTreeMap<String, keysum::KeySum>;
+
+
 
 fn main() {
     if let Err(err) = csv() {
@@ -365,7 +349,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         all_the_maps.push(map);
     }
     let main_map = if !cfg.no_output {
-        sum_maps(&mut all_the_maps, cfg.verbose)
+        sum_maps(&mut all_the_maps, cfg.verbose, &cfg)
     } else {
         create_map()
     };
@@ -467,11 +451,23 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 for x in &cfg.sum_fields {
                     vcell.push(Cell::new(&format!("s:{}", re_mod_idx(&cfg, *x))));
                 }
+                for x in &cfg.min_num_fields {
+                    vcell.push(Cell::new(&format!("min:{}", re_mod_idx(&cfg, *x))));
+                }
+                for x in &cfg.max_num_fields {
+                    vcell.push(Cell::new(&format!("max:{}", re_mod_idx(&cfg, *x))));
+                }
                 for x in &cfg.avg_fields {
                     vcell.push(Cell::new(&format!("a:{}", re_mod_idx(&cfg, *x))));
                 }
                 for x in &cfg.unique_fields {
                     vcell.push(Cell::new(&format!("u:{}", re_mod_idx(&cfg, *x))));
+                }
+                for x in &cfg.min_str_fields {
+                    vcell.push(Cell::new(&format!("minstr:{}", re_mod_idx(&cfg, *x))));
+                }
+                for x in &cfg.max_str_fields {
+                    vcell.push(Cell::new(&format!("maxstr:{}", re_mod_idx(&cfg, *x))));
                 }
                 let row = Row::new(vcell);
                 celltable.borrow_mut().set_titles(row);
@@ -491,8 +487,11 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 if !cfg.no_record_count {
                     vcell.push(Cell::new(&format!("{}", cc.count)));
                 }
-                for x in &cc.sums {
-                    vcell.push(Cell::new(&format!("{}", x)));
+                for x in &cc.nums {
+                    match x {
+                        Some(x) =>vcell.push(Cell::new(&format!("{}", x))),
+                        None => vcell.push(Cell::new(&format!("{}", &cfg.null))),
+                    };
                 }
                 for x in &cc.avgs {
                     if x.1 == 0 {
@@ -508,6 +507,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                         vcell.push(Cell::new(&format!("{}", &cc.distinct[i].len())));
                     }
                 }
+                for x in &cc.strs {
+                    match x {
+                        Some(x) =>vcell.push(Cell::new(&format!("{}", x))),
+                        None => vcell.push(Cell::new(&format!("{}", &cfg.null))),
+                    };
+                }
+
                 let row = Row::new(vcell);
                 celltable.borrow_mut().add_row(row);
             }
@@ -524,11 +530,10 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             let mut line_out = String::with_capacity(180);
             {
                 if cfg.key_fields.len() > 0 {
-
                     for x in &cfg.key_fields {
                         line_out.push_str(&format!("k:{}{}", re_mod_idx(&cfg, *x), &cfg.od));
                     }
-                    line_out.truncate(line_out.len()-1);
+                    line_out.truncate(line_out.len() - 1);
                 } else {
                     line_out.push_str(&format!("{}k:-", &cfg.od));
                 }
@@ -538,11 +543,23 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 for x in &cfg.sum_fields {
                     line_out.push_str(&format!("{}s:{}", &cfg.od, re_mod_idx(&cfg, *x)));
                 }
+                for x in &cfg.min_num_fields {
+                    line_out.push_str(&format!("{}min:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                }
+                for x in &cfg.max_num_fields {
+                    line_out.push_str(&format!("{}max:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                }
                 for x in &cfg.avg_fields {
                     line_out.push_str(&format!("{}a:{}", &cfg.od, re_mod_idx(&cfg, *x)));
                 }
                 for x in &cfg.unique_fields {
                     line_out.push_str(&format!("{}u:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                }
+                for x in &cfg.min_str_fields {
+                    line_out.push_str(&format!("{}minstr:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                }
+                for x in &cfg.max_str_fields {
+                    line_out.push_str(&format!("{}maxstr:{}", &cfg.od, re_mod_idx(&cfg, *x)));
                 }
                 line_out.push('\n');
                 writer.write_all(&line_out.as_bytes())?;
@@ -556,14 +573,17 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         line_out.push_str(&keyv[i]);
                     }
-                    if i < keyv.len()-1 { line_out.push_str(&cfg.od); }
+                    if i < keyv.len() - 1 { line_out.push_str(&cfg.od); }
                 }
                 let cc = main_map.get(*ff).unwrap();
                 if !cfg.no_record_count {
                     line_out.push_str(&format!("{}{}", &cfg.od, cc.count));
                 }
-                for x in &cc.sums {
-                    line_out.push_str(&format!("{}{}", &cfg.od, x));
+                for x in &cc.nums {
+                    match x {
+                        Some(x) =>line_out.push_str(&format!("{}{}", &cfg.od, x)),
+                        None => line_out.push_str(&format!("{}{}", &cfg.od, &cfg.null)),
+                    };
                 }
                 for x in &cc.avgs {
                     line_out.push_str(&format!("{}{}", &cfg.od, x.0 / (x.1 as f64)));
@@ -575,6 +595,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         line_out.push_str(&format!("{}{}", &cfg.od, cc.distinct[i].len()));
                     }
+                }
+                for x in &cc.strs {
+                    line_out.push_str(&cfg.od);
+                    match x {
+                        Some(x) =>line_out.push_str(&format!("{}", x)),
+                        None => line_out.push_str(&cfg.null),
+                    };
                 }
                 line_out.push('\n');
                 writer.write_all(&line_out.as_bytes())?;
@@ -698,8 +725,10 @@ fn _worker_re(
                         v.push(x);
                     }
                     for i in 1..cl.len() {
-                        let r = cl.get(i).unwrap();
-                        v.push(&line[r.0..r.1]);
+                        match cl.get(i) {
+                            Some(t) => v.push(&line[t.0..t.1]),
+                            None => v.push(""),
+                        }
                     }
                     if cfg.verbose > 2 { eprintln!("DBG RE WITH FILE PASTS VEC: {:?}", v); }
                     fieldcount += store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
@@ -737,7 +766,19 @@ fn _worker_csv(
 
     let mut builder = csv::ReaderBuilder::new();
     //let delimiter = dbg!(cfg.delimiter.expect("delimiter is malformed"));
-    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.skip_header).flexible(true);//.escape(Some(b'\\')).flexible(true).comment(Some(b'#'));
+    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.skip_header).flexible(true);
+
+    if cfg.quote.is_some() {
+        builder.quote(cfg.quote.unwrap() as u8);
+    }
+
+    if cfg.escape.is_some() {
+        builder.escape(Some(cfg.escape.unwrap() as u8));
+    }
+
+    if cfg.comment.is_some() {
+        builder.comment(Some(cfg.comment.unwrap() as u8));
+    }
 
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
@@ -762,7 +803,7 @@ fn _worker_csv(
                     let mut v = SmallVec::<[&str; 16]>::new();
 //                    let mut v: Vec<&str> = Vec::with_capacity(record.len() + fc.sub_grps.len());
                     fc.sub_grps.iter().map(|x| x.as_str()).chain(record.iter())
-                      .for_each(|x| v.push(x)); //
+                        .for_each(|x| v.push(x)); //
                     if cfg.verbose > 2 { eprintln!("DBG WITH FILE PASTS VEC: {:?}", v); }
                     fieldcount += store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
                     v.clear();
@@ -882,7 +923,7 @@ fn _worker_multi_re(
                     if re_curr_idx >= re_es.len() {
                         let mut v: Vec<&str> = Vec::with_capacity(acc_record.len() + fc.sub_grps.len());
                         fc.sub_grps.iter().map(|x| x.as_str()).chain(acc_record.iter().map(|x| x.as_str()))
-                          .for_each(|x| v.push(x)); //
+                            .for_each(|x| v.push(x)); //
 
 
                         fieldcount += store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
@@ -909,144 +950,3 @@ fn _worker_multi_re(
     Ok((map, rowcount, fieldcount))
 }
 
-fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> usize
-    where
-        T: std::ops::Index<usize> + std::fmt::Debug,
-        <T as std::ops::Index<usize>>::Output: AsRef<str>,
-{
-    //let mut ss: String = String::with_capacity(256);
-    ss.clear();
-
-    let mut fieldcount = 0usize;
-
-    if cfg.verbose >= 3 {
-        if line.len() > 0 {
-            eprintln!("DBG:  {:?}  from: {}", &record, line);
-        } else {
-            eprintln!("DBG:  {:?}", &record);
-        }
-    }
-    if cfg.key_fields.len() > 0 {
-        fieldcount += rec_len;
-        for i in 0..cfg.key_fields.len() {
-            let index = cfg.key_fields[i];
-            if index < rec_len {
-                ss.push_str(&record[index].as_ref());
-            } else {
-                ss.push_str("NULL");
-            }
-            ss.push(KEY_DEL as char);
-        }
-        ss.pop(); // remove the trailing | instead of check each iteration
-        // we know we get here because of the if above.
-    } else {
-        ss.push_str("NULL");
-    }
-    *rowcount += 1;
-
-    let mut brec: &mut KeySum = {
-        if let Some(v1) = map.get_mut(ss) {
-            v1
-        } else {
-            let v2 = KeySum::new(cfg.sum_fields.len(), cfg.unique_fields.len(), cfg.avg_fields.len());
-            map.insert(ss.clone(), v2);
-            // TODO:  gree - just inserted but cannot use it right away instead of doing a lookup again?!!!
-            // return v2 or &v2 does not compile
-            map.get_mut(ss).unwrap()
-        }
-    };
-
-    brec.count += 1;
-
-    if cfg.sum_fields.len() > 0 {
-        for i in 0..cfg.sum_fields.len() {
-            let index = cfg.sum_fields[i];
-            if index < rec_len {
-                let v = &record[index];
-                match v.as_ref().parse::<f64>() {
-                    Err(_) => {
-                        if cfg.verbose > 2 {
-                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
-                        }
-                    }
-                    Ok(vv) => brec.sums[i] += vv,
-                }
-            }
-        }
-    }
-
-    if cfg.avg_fields.len() > 0 {
-        for i in 0..cfg.avg_fields.len() {
-            let index = cfg.avg_fields[i];
-            if index < rec_len {
-                let v = &record[index];
-                match v.as_ref().parse::<f64>() {
-                    Err(_) => {
-                        if cfg.verbose > 2 {
-                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
-                        }
-                    }
-                    Ok(vv) => {
-                        brec.avgs[i].0 += vv;
-                        brec.avgs[i].1 += 1;
-                    }
-                }
-            }
-        }
-    }
-    if cfg.unique_fields.len() > 0 {
-        for i in 0..cfg.unique_fields.len() {
-            let index = cfg.unique_fields[i];
-            if index < rec_len {
-                if !brec.distinct[i].contains_key(record[index].as_ref()) {
-                    brec.distinct[i].insert(record[index].as_ref().to_string(), 1);
-                } else {
-                    let x = brec.distinct[i].get_mut(record[index].as_ref()).unwrap();
-                    *x = *x + 1;
-                }
-            }
-        }
-    }
-
-    fieldcount
-}
-
-fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize) -> MyMap {
-    let start = Instant::now();
-    let lens = join(maps.iter().map(|x| x.len().to_string()), ",");
-    let mut p_map = maps.remove(0);
-    use itertools::join;
-    for i in 0..maps.len() {
-        for (k, v) in maps.get(i).unwrap() {
-            let v_new = p_map.entry(k.to_string()).or_insert(KeySum::new(v.sums.len(), v.distinct.len(), v.avgs.len()));
-            v_new.count += v.count;
-
-            for j in 0..v.sums.len() {
-                v_new.sums[j] += v.sums[j];
-            }
-
-            for j in 0..v.avgs.len() {
-                v_new.avgs[j].0 += v.avgs[j].0;
-                v_new.avgs[j].1 += v.avgs[j].1;
-            }
-
-            for j in 0..v.distinct.len() {
-                for (_ii, u) in v.distinct[j].iter().enumerate() {
-                    if !v_new.distinct[j].contains_key(u.0) {
-                        v_new.distinct[j].insert(u.0.clone(), *u.1);
-                    } else {
-                        let x = v_new.distinct[j].get_mut(u.0).unwrap();
-                        *x = *x + *u.1;
-                    }
-                }
-            }
-        }
-    }
-    let end = Instant::now();
-    let dur = end - start;
-    if verbose > 0 {
-        eprintln!("merge maps time: {:.3}s from map entry counts: [{}] to single map {} entries", dur.as_millis() as f64 / 1000.0f64,
-                  lens, p_map.len());
-    }
-    p_map
-}
