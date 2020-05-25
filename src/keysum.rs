@@ -237,7 +237,6 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
         for (k, v) in maps.get_mut(i).unwrap() {
             let v_new = p_map.entry(k.to_string()).or_insert(
                 {
-                    count_new += 1;
                     KeySum::new(v.nums.len(), v.strs.len(), v.distinct.len(),
                                 v.avgs.len())
                 });
@@ -286,7 +285,7 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
                 match (&v.strs[dest], &mut v_new.strs[dest]) {
                     (Some(o), Some(n)) => if n.as_str() > o.as_str() { v_new.strs[dest] = v.strs[dest].take();},
                     (Some(o), None) => v_new.strs[dest] = v.strs[dest].take(),
-                    (_, _) => {count_both_null_max+=1;}
+                    (_, _) => {}
                 }
             }
 
@@ -296,7 +295,7 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
                 match (&v.strs[dest], &mut v_new.strs[dest]) {
                     (Some(o), Some(n)) => if n.as_str() < o.as_str() { v_new.strs[dest] = v.strs[dest].take();},
                     (Some(o), None) => v_new.strs[dest] = v.strs[dest].take(),
-                    (_, _) => {count_both_null_max+=1;}
+                    (_, _) => {}
                 }
             }
 
