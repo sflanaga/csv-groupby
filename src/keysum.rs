@@ -190,8 +190,6 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
                 match &mut brec.strs[dest] {
                     Some(x) => {
                         if x.as_str() > v.as_ref() {
-                            // seems like there has to be a more elegant want to do this
-                            // if I have capacity reuse it but does cloning do that?
                             x.clear();
                             x.push_str(v.as_ref());
                         }
@@ -225,6 +223,28 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
 }
 
 
+fn merge_f64<F>(x: Option<f64>, y: Option<f64>, pickone: F) -> Option<f64>
+    where F: Fn(f64, f64) -> f64
+{
+    return match (x,y) {
+        (Some(old), Some(new)) => Some(pickone(new, old)),
+        (Some(old), None) => Some(old),
+        (None, Some(new)) => Some(new),
+        (_, _) => None,
+    }
+}
+
+fn merge_string<'a, F>(old: &'a mut Option<String>, new: &'a mut Option<String>, pickone:F) -> ()
+    where F: Fn(&'a mut Option<String>, &'a mut Option<String>)
+{
+    match (&old,&new) {
+        (Some(x), Some(y)) => pickone(new, old), //*new = old.take(), //f(new,old),
+        (Some(x), None) => *new = old.take(),
+        (None, Some(new)) => {},
+        (_, _) => {},
+    }
+}
+
 pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
     let start = Instant::now();
     let lens = "NEEDTOFIXTHIS"; //join(maps.iter().map(|x:&MyMap| x.len().to_string()), ",");
@@ -234,77 +254,61 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
     let mut p_map = maps.remove(0);
     use itertools::join;
     for i in 0..maps.len() {
-        for (k, v) in maps.get_mut(i).unwrap() {
-            let v_new = p_map.entry(k.to_string()).or_insert(
+        for (k, old) in maps.get_mut(i).unwrap() {
+            let new = p_map.entry(k.to_string()).or_insert(
                 {
-                    KeySum::new(v.nums.len(), v.strs.len(), v.distinct.len(),
-                                v.avgs.len())
+                    KeySum::new(old.nums.len(), old.strs.len(), old.distinct.len(),
+                                old.avgs.len())
                 });
-            v_new.count += v.count;
+            new.count += old.count;
 
             // need to provide proper sum, min, max operators
 
             let mut start = 0;
             for (i, index) in cfg.sum_fields.iter().enumerate() {
-                let dest = start +i;
-                match (v.nums[dest], &mut v_new.nums[dest]) {
-                    (Some(o), Some(n)) => *n += o,
-                    (Some(o), None) => v_new.nums[dest] = Some(o),
-                    (_, _) => {}
-                }
+                let dest = start + i;
+                new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 {x + y});
             }
 
             start += cfg.sum_fields.len();
             for (i, index) in cfg.min_num_fields.iter().enumerate() {
                 let dest = start + i;
-                match (v.nums[dest], &mut v_new.nums[dest]) {
-                    (Some(o), Some(n)) => *n = n.min(o),
-                    (Some(o), None) => v_new.nums[dest] = Some(o),
-                    (_, _) => {}
-                }
+                new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 {x.min(y)});
             }
 
             start += cfg.min_num_fields.len();
             for (i, index) in cfg.max_num_fields.iter().enumerate() {
                 let dest = start + i;
-                match (v.nums[dest], &mut v_new.nums[dest]) {
-                    (Some(o), Some(n)) => *n = n.max(o),
-                    (Some(o), None) => v_new.nums[dest] = Some(o),
-                    (_, _) => {}
-                }
+                new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 {x.max(y)});
             }
 
-            for j in 0..v.avgs.len() {
-                v_new.avgs[j].0 += v.avgs[j].0;
-                v_new.avgs[j].1 += v.avgs[j].1;
+            for j in 0..old.avgs.len() {
+                new.avgs[j].0 += old.avgs[j].0;
+                new.avgs[j].1 += old.avgs[j].1;
             }
 
             start = 0;
             for (i, index) in cfg.min_str_fields.iter().enumerate() {
                 let dest = start + i;
-                match (&v.strs[dest], &mut v_new.strs[dest]) {
-                    (Some(o), Some(n)) => if n.as_str() > o.as_str() { v_new.strs[dest] = v.strs[dest].take();},
-                    (Some(o), None) => v_new.strs[dest] = v.strs[dest].take(),
-                    (_, _) => {}
-                }
+                merge_string(&mut old.strs[dest], &mut new.strs[dest], |old, new| {
+                    if old < new { *new = old.take(); }
+                });
             }
 
             start += cfg.min_str_fields.len();
             for (i, index) in cfg.max_str_fields.iter().enumerate() {
                 let dest = start + i;
-                match (&v.strs[dest], &mut v_new.strs[dest]) {
-                    (Some(o), Some(n)) => if n.as_str() < o.as_str() { v_new.strs[dest] = v.strs[dest].take();},
-                    (Some(o), None) => v_new.strs[dest] = v.strs[dest].take(),
-                    (_, _) => {}
-                }
+                merge_string(&mut old.strs[dest], &mut new.strs[dest], |old, new| {
+                    if old > new { *new = old.take(); }
+                });
             }
 
-            for j in 0..v.distinct.len() {
-                for (_ii, u) in v.distinct[j].iter().enumerate() {
-                    if !v_new.distinct[j].contains_key(u.0) {
-                        v_new.distinct[j].insert(u.0.clone(), *u.1);
+            for j in 0..old.distinct.len() {
+                for (_ii, u) in old.distinct[j].iter().enumerate() {
+                    if !new.distinct[j].contains_key(u.0) {
+                        new.distinct[j].insert(u.0.clone(), *u.1);
                     } else {
-                        let x = v_new.distinct[j].get_mut(u.0).unwrap();
+                        let x = new.distinct[j].get_mut(u.0).unwrap();
                         *x = *x + *u.1;
                     }
                 }
@@ -321,3 +325,38 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
     p_map
 }
 
+/***
+pub fn store_field<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, brec: &mut KeySum, fieldmap: &Vec<usize>, start: usize, cfg: &CliCfg, parse: F) -> ()
+    where
+        T: std::ops::Index<usize> + std::fmt::Debug,
+        F: Fn(&str) -> f64,
+        <T as std::ops::Index<usize>>::Output: AsRef<str>,
+{
+    //
+    let ll = record.iter().len();
+
+    if fieldmap.len() > 0 {
+        for (i, index) in fieldmap.iter().enumerate() {
+            let place = i + start;
+            if *index < rec_len {
+                let v = &record[*index];
+
+                let xv = parse_ref::<f64>(v.as_ref());
+
+                match v.as_ref().parse::<f64>() {
+                    Err(_) => {
+                        if cfg.verbose > 2 {
+                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
+                        }
+                    }
+                    Ok(vv) => match &mut brec.nums[place] {
+                        Some(x) => *x += vv,
+                        None => brec.nums[place] = Some(vv),
+                    }
+                }
+            }
+        }
+    }
+}
+
+***/
