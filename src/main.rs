@@ -150,6 +150,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
+    let mut total_fieldskipped = 0usize;
     let mut total_blocks = 0usize;
     let mut total_bytes = 0usize;
 
@@ -343,9 +344,10 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     // merge the data from the workers
     let mut all_the_maps = vec![];
     for h in worker_handlers {
-        let (map, linecount, fieldcount) = h.join().unwrap();
+        let (map, linecount, fieldcount, fieldskipped) = h.join().unwrap();
         total_rowcount += linecount;
         total_fieldcount += fieldcount;
+        total_fieldskipped += fieldskipped;
         all_the_maps.push(map);
     }
     let main_map = if !cfg.no_output {
@@ -460,14 +462,14 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 for x in &cfg.avg_fields {
                     vcell.push(Cell::new(&format!("a:{}", re_mod_idx(&cfg, *x))));
                 }
-                for x in &cfg.unique_fields {
-                    vcell.push(Cell::new(&format!("u:{}", re_mod_idx(&cfg, *x))));
-                }
                 for x in &cfg.min_str_fields {
                     vcell.push(Cell::new(&format!("minstr:{}", re_mod_idx(&cfg, *x))));
                 }
                 for x in &cfg.max_str_fields {
                     vcell.push(Cell::new(&format!("maxstr:{}", re_mod_idx(&cfg, *x))));
+                }
+                for x in &cfg.unique_fields {
+                    vcell.push(Cell::new(&format!("u:{}", re_mod_idx(&cfg, *x))));
                 }
                 let row = Row::new(vcell);
                 celltable.borrow_mut().set_titles(row);
@@ -500,13 +502,6 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                         vcell.push(Cell::new(&format!("{}", (x.0 / (x.1 as f64)))));
                     }
                 }
-                for i in 0usize..cc.distinct.len() {
-                    if cfg.write_distros.contains(&cfg.unique_fields[i]) {
-                        vcell.push(Cell::new(&format!("{}", distro_format(&cc.distinct[i], cfg.write_distros_upper, cfg.write_distros_bottom))));
-                    } else {
-                        vcell.push(Cell::new(&format!("{}", &cc.distinct[i].len())));
-                    }
-                }
                 for x in &cc.strs {
                     match x {
                         Some(x) =>vcell.push(Cell::new(&format!("{}", x))),
@@ -514,6 +509,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     };
                 }
 
+                for i in 0usize..cc.distinct.len() {
+                    if cfg.write_distros.contains(&cfg.unique_fields[i]) {
+                        vcell.push(Cell::new(&format!("{}", distro_format(&cc.distinct[i], cfg.write_distros_upper, cfg.write_distros_bottom))));
+                    } else {
+                        vcell.push(Cell::new(&format!("{}", &cc.distinct[i].len())));
+                    }
+                }
                 let row = Row::new(vcell);
                 celltable.borrow_mut().add_row(row);
             }
@@ -552,14 +554,14 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 for x in &cfg.avg_fields {
                     line_out.push_str(&format!("{}a:{}", &cfg.od, re_mod_idx(&cfg, *x)));
                 }
-                for x in &cfg.unique_fields {
-                    line_out.push_str(&format!("{}u:{}", &cfg.od, re_mod_idx(&cfg, *x)));
-                }
                 for x in &cfg.min_str_fields {
                     line_out.push_str(&format!("{}minstr:{}", &cfg.od, re_mod_idx(&cfg, *x)));
                 }
                 for x in &cfg.max_str_fields {
                     line_out.push_str(&format!("{}maxstr:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                }
+                for x in &cfg.unique_fields {
+                    line_out.push_str(&format!("{}u:{}", &cfg.od, re_mod_idx(&cfg, *x)));
                 }
                 line_out.push('\n');
                 writer.write_all(&line_out.as_bytes())?;
@@ -588,6 +590,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 for x in &cc.avgs {
                     line_out.push_str(&format!("{}{}", &cfg.od, x.0 / (x.1 as f64)));
                 }
+                for x in &cc.strs {
+                    line_out.push_str(&cfg.od);
+                    match x {
+                        Some(x) =>line_out.push_str(&format!("{}", x)),
+                        None => line_out.push_str(&cfg.null),
+                    };
+                }
                 for i in 0usize..cc.distinct.len() {
                     if cfg.write_distros.contains(&cfg.unique_fields[i]) {
                         line_out.push_str(&cfg.od);
@@ -595,13 +604,6 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     } else {
                         line_out.push_str(&format!("{}{}", &cfg.od, cc.distinct[i].len()));
                     }
-                }
-                for x in &cc.strs {
-                    line_out.push_str(&cfg.od);
-                    match x {
-                        Some(x) =>line_out.push_str(&format!("{}", x)),
-                        None => line_out.push_str(&cfg.null),
-                    };
                 }
                 line_out.push('\n');
                 writer.write_all(&line_out.as_bytes())?;
@@ -633,13 +635,16 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             mem_metric_digit(GLOBAL_TRACKER.get_alloc(), 4)
         );
     }
+    if total_fieldskipped > 0 {
+        eprintln!("Some fields were skipped {}.  They could not be parsed a numeric.", total_fieldskipped);
+    }
     Ok(())
 }
 
-fn worker_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
+fn worker_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize, usize) {
     // return lines / fields
     match _worker_re(&send_blocks, cfg, recv) {
-        Ok((map, lines, fields)) => (map, lines, fields),
+        Ok((map, lines, fields, fieldskipped)) => (map, lines, fields, fieldskipped),
         Err(e) => {
             let err_msg = format!("Unable to process inner file - likely compressed or not UTF8 text: {}", e);
             panic!(err_msg);
@@ -673,7 +678,7 @@ fn _worker_re(
     send_blocks: &crossbeam_channel::Sender<Vec<u8>>,
     cfg: &CliCfg,
     recv: &crossbeam_channel::Receiver<Option<FileSlice>>,
-) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
+) -> Result<(MyMap, usize, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = create_map();
@@ -688,6 +693,7 @@ fn _worker_re(
     };
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
+    let mut fieldskipped = 0;
     let mut rowcount = 0;
     let mut _skipped = 0;
     let mut cl = re.capture_locations();
@@ -731,7 +737,9 @@ fn _worker_re(
                         }
                     }
                     if cfg.verbose > 2 { eprintln!("DBG RE WITH FILE PASTS VEC: {:?}", v); }
-                    fieldcount += store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
+                    let (fc,fs) = store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
+                    fieldcount += fc;
+                    fieldskipped += fs;
                     //v.clear();
                 } else {
                     _skipped += 1;
@@ -742,12 +750,12 @@ fn _worker_re(
             send_blocks.send(fc.block)?;
         }
     }
-    Ok((map, rowcount, fieldcount))
+    Ok((map, rowcount, fieldcount, fieldskipped))
 }
 
-fn worker_csv(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
+fn worker_csv(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize, usize) {
     match _worker_csv(&send_blocks, cfg, recv) {
-        Ok((map, lines, fields)) => (map, lines, fields),
+        Ok((map, lines, fields, fieldskipped)) => (map, lines, fields, fieldskipped),
         Err(e) => {
             let err_msg = format!("Unable to process inner block - likely compressed or not UTF8 text: {}", e);
             panic!(err_msg);
@@ -759,7 +767,7 @@ fn _worker_csv(
     send_blocks: &crossbeam_channel::Sender<Vec<u8>>,
     cfg: &CliCfg,
     recv: &crossbeam_channel::Receiver<Option<FileSlice>>,
-) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
+) -> Result<(MyMap, usize, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = create_map();
@@ -782,6 +790,7 @@ fn _worker_csv(
 
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
+    let mut fieldskipped = 0;
     let mut rowcount = 0;
     loop {
         let fc = match recv.recv().unwrap() {
@@ -805,13 +814,19 @@ fn _worker_csv(
                     fc.sub_grps.iter().map(|x| x.as_str()).chain(record.iter())
                         .for_each(|x| v.push(x)); //
                     if cfg.verbose > 2 { eprintln!("DBG WITH FILE PASTS VEC: {:?}", v); }
-                    fieldcount += store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
+                    let (fc, fs) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
+                    fieldcount += fc;
+                    fieldskipped += fs;
+
                     v.clear();
                 }
             } else {
                 for record in recrdr.records() {
                     let record = record?;
-                    fieldcount += store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+                    let (fc, fs) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+                    fieldcount += fc;
+                    fieldskipped += fs;
+
                 }
             }
         }
@@ -819,13 +834,13 @@ fn _worker_csv(
             send_blocks.send(fc.block)?;
         }
     }
-    Ok((map, rowcount, fieldcount))
+    Ok((map, rowcount, fieldcount, fieldskipped))
 }
 
-fn worker_multi_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize) {
+fn worker_multi_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize, usize) {
     // return lines / fields
     match _worker_multi_re(&send_blocks, cfg, recv) {
-        Ok((map, lines, fields)) => (map, lines, fields),
+        Ok((map, lines, fields, fieldskipped)) => (map, lines, fields, fieldskipped),
         Err(e) => {
             let err_msg = format!("Unable to process inner file - likely compressed or not UTF8 text: {}", e);
             panic!(err_msg);
@@ -857,7 +872,7 @@ fn _worker_multi_re(
     send_blocks: &crossbeam_channel::Sender<Vec<u8>>,
     cfg: &CliCfg,
     recv: &crossbeam_channel::Receiver<Option<FileSlice>>,
-) -> Result<(MyMap, usize, usize), Box<dyn std::error::Error>> {
+) -> Result<(MyMap, usize, usize, usize), Box<dyn std::error::Error>> {
     let mut map = create_map();
 
     let mut re_es = vec![];
@@ -873,6 +888,7 @@ fn _worker_multi_re(
 
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
+    let mut fieldskipped = 0;
     let mut rowcount = 0;
     let mut linecount = 0;
     let mut _skipped = 0;
@@ -926,7 +942,9 @@ fn _worker_multi_re(
                             .for_each(|x| v.push(x)); //
 
 
-                        fieldcount += store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
+                        let (fc, fs) = store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
+                        fieldcount += fc;
+                        fieldskipped += fs;
                         if cfg.verbose > 2 {
                             eprintln!("mRE STORE {:?} on line: {}", acc_record, line);
                         }
@@ -947,6 +965,6 @@ fn _worker_multi_re(
             send_blocks.send(fc.block)?;
         }
     }
-    Ok((map, rowcount, fieldcount))
+    Ok((map, rowcount, fieldcount, fieldskipped))
 }
 

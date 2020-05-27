@@ -239,6 +239,17 @@ fn escape_parser(s: &str) -> Result<char> {
 }
 
 fn add_n_check(indices:&mut Vec<usize>, comment: &str) -> Result<()> {
+
+    let mut last = usize::MAX;
+    let mut clone_indices = indices.clone();
+    clone_indices.sort();
+
+    for x in clone_indices.iter() {
+        if *x == last {
+            Err(format!("Field indices must be unique per purpose. Field position {} appears more than once for option {}", *x, comment))?;
+        }
+        last = *x;
+    }
     for x in indices.iter_mut() {
         if *x == 0 {Err(format!("Field indices must be 1 or greater - using base 1 indexing, got a {} for option {}", *x, comment))?; }
         *x -= 1;

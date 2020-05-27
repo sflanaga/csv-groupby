@@ -41,17 +41,17 @@ mod tests {
         input_str
     }
 
-    static EXPECTED_OUT1: &str = "k:1,count,s:4,a:1,u:2
-0,99,99000,0,99
-1,100,99200,1,100
-2,100,99400,2,100
-3,100,99600,3,100
-4,100,99800,4,100
-5,100,100000,5,100
-6,100,100200,6,100
-7,100,100400,7,100
-8,100,100600,8,100
-9,100,100800,9,100
+    static EXPECTED_OUT1: &str = "k:1,count,s:4,min:4,max:4,a:1,minstr:2,maxstr:2,u:2
+0,99,99000,20,1980,0,10,990,99
+1,100,99200,2,1982,1,1,991,100
+2,100,99400,4,1984,2,102,992,100
+3,100,99600,6,1986,3,103,993,100
+4,100,99800,8,1988,4,104,994,100
+5,100,100000,10,1990,5,105,995,100
+6,100,100200,12,1992,6,106,996,100
+7,100,100400,14,1994,7,107,997,100
+8,100,100600,16,1996,8,108,998,100
+9,100,100800,18,1998,9,109,999,100
 ";
 
     static EXPECTED_OUT2: &str = "k:1,count,s:4,a:1,u:2
@@ -117,20 +117,25 @@ mod tests {
     }
 
     #[test]
+    fn just_write_stdstuff_to_look_at() {
+        println!("HERE THAT OUTPUT TO LOOK AT:\n{}", create_fake_input1(true));
+    }
+
+    #[test]
     fn run_easy() -> Result<(), Box<dyn std::error::Error>> {
-        stdin_test_driver("-k 1 -s 4 -u 2 -a 1 -c -t 1", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
+        stdin_test_driver("-k 1 -s 4 -u 2 -a 1 -n 4 -N 2 -x 4 -X 2 -t 1 -c", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
     }
 
     #[test]
     fn force_threaded_small_block() -> Result<(), Box<dyn std::error::Error>> {
-        stdin_test_driver("-k 1 -s 4 -u 2 -a 1 -c -t 4 --block_size_B 64", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
+        stdin_test_driver("-k 1 -s 4 -u 2 -a 1 -n 4 -N 2 -x 4 -X 2 -t 1 -c --block_size_B 64", &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)
     }
 
     #[test]
     fn force_threaded_varied_block_size_keyones() -> Result<(), Box<dyn std::error::Error>> {
         let input = &create_fake_input1(true);
         for i in &[32, 33, 49, 51, 52, 128, 256, 511, 512, 15000] {
-            let args = format!("-k 1 -s 4 -u 2 -a 1 -c -t 4 --block_size_B {}", i);
+            let args = format!("-k 1 -s 4 -u 2 -a 1 -n 4 -N 2 -x 4 -X 2 -t 1 -c --block_size_B {}", i);
             stdin_test_driver(&args, &INPUT_SET_1_NO_FINAL_NEWLINE, EXPECTED_OUT1)?;
         }
         Ok(())
@@ -140,7 +145,7 @@ mod tests {
     fn force_threaded_varied_block_size() -> Result<(), Box<dyn std::error::Error>> {
         let input = &create_fake_input1(true);
         for i in 32..64 {
-            let args = format!("-k 1 -s 4 -u 2 -a 1 -c -t 4 --block_size_B {}", i);
+            let args = format!("-k 1 -s 4 -u 2 -a 1 -n 4 -N 2 -x 4 -X 2 -t 1 -c --block_size_B {}", i);
             stdin_test_driver(&args, &INPUT_SET_1_WITH_FINAL_NEWLINE, EXPECTED_OUT1)?;
         }
         Ok(())
@@ -150,7 +155,7 @@ mod tests {
     fn force_threaded_varied_block_size_no_final_newline() -> Result<(), Box<dyn std::error::Error>> {
         let input = &create_fake_input1(true);
         for i in 32..64 {
-            let args = format!("-k 1 -s 4 -u 2 -a 1 -c -t 4 --block_size_B {}", i);
+            let args = format!("-k 1 -s 4 -u 2 -a 1 -n 4 -N 2 -x 4 -X 2 -t 1 -c --block_size_B {}", i);
             stdin_test_driver(&args, &INPUT_SET_1_NO_FINAL_NEWLINE, EXPECTED_OUT1)?;
         }
         Ok(())
@@ -159,7 +164,7 @@ mod tests {
     #[test]
     fn re_force_thread_small_block() -> Result<(), Box<dyn std::error::Error>> {
         stdin_test_driver(
-            "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 1 -s 4 -u 2 -a 1 -c -t 4 --block_size_B 20",
+            "-r ^([^,]+),([^,]+),([^,]+),([^,]+)$ -k 1 -s 4 -u 2 -a 1 -n 4 -N 2 -x 4 -X 2 -t 4 -c --block_size_B 20",
             &INPUT_SET_1_WITH_FINAL_NEWLINE,
             EXPECTED_OUT1,
         )

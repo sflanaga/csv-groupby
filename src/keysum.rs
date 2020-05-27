@@ -34,15 +34,52 @@ impl KeySum {
     }
 }
 
-pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> usize
+pub fn parse_and_merge_f64<T, F>(line: &str, record: &T, rec_len: usize, keysum: &mut KeySum, startpos: usize, fields: &Vec<usize>, cfg: &CliCfg, mergefield: F)
     where
-        T: std::ops::Index<usize> + std::fmt::Debug,
         <T as std::ops::Index<usize>>::Output: AsRef<str>,
+        T: std::ops::Index<usize> + std::fmt::Debug,
+        F: Fn(&Option<f64>, f64) -> f64
+{
+    for (i, index) in fields.iter().enumerate() {
+        let place = i + startpos;
+        if *index < rec_len {
+            let v = &record[*index].as_ref();
+
+            match v.parse::<f64>() {
+                Err(_) => {
+                    if cfg.verbose > 2 {
+                        eprintln!("error parsing string |{}| as a float for summary: {} so pretending value is 0", v, index);
+                    }
+                }
+                Ok(vv) => keysum.nums[place] = Some(mergefield(&keysum.nums[place], vv)),
+            }
+        }
+    }
+    // before lambdas used... this worked too:
+    /*
+
+    parse_and_merge_f64(line, record, rec_len, &mut brec,
+                        start, &cfg.min_num_fields,
+                        cfg, |dest, new| -> (f64) {
+            match dest {
+                Some(x) => x.min(new),
+                None => new,
+            }
+        });
+
+     */
+}
+
+pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> (usize,usize)
+    where
+        <T as std::ops::Index<usize>>::Output: AsRef<str>,
+        T: std::ops::Index<usize> + std::fmt::Debug,
 {
     //let mut ss: String = String::with_capacity(256);
     ss.clear();
 
     let mut fieldcount = 0usize;
+    let mut skipfields = 0usize;
 
     if cfg.verbose >= 3 {
         if line.len() > 0 {
@@ -58,14 +95,14 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
             if index < rec_len {
                 ss.push_str(&record[index].as_ref());
             } else {
-                ss.push_str("NULL");
+                ss.push_str(&cfg.null);
             }
             ss.push(KEY_DEL as char);
         }
-        ss.pop(); // remove the trailing | instead of check each iteration
+        ss.pop(); // remove the trailing KEY_DEL instead of check each iteration
         // we know we get here because of the if above.
     } else {
-        ss.push_str("NULL");
+        ss.push_str(&cfg.null);
     }
     *rowcount += 1;
 
@@ -85,67 +122,54 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
 
     brec.count += 1;
 
+    let mut mergefields = |fields: &Vec<usize>, startpos: usize, comment: &str, mergefield: &Fn(&Option<f64>, f64) -> f64| -> () {
+        for (i, index) in fields.iter().enumerate() {
+            let place = i + startpos;
+            let v = &record[*index].as_ref();
+            match v.parse::<f64>() {
+                Err(_) => {
+                    skipfields += 1;
+                    if cfg.verbose > 1 {
+                        eprintln!("Error parsing string \"{}\" as a float so skipping it. Intended for {} slot: {}", v, comment, place);
+                    }
+                }
+                Ok(vv) => brec.nums[place] = Some(mergefield(&brec.nums[place], vv)),
+            }
+        }
+    };
+
+    let sumf64 = |dest:&Option<f64>, new:f64| -> (f64) {
+        match dest {
+            Some(x) => *x + new,
+            None => new,
+        }
+    };
+
+    let minf64 = |dest:&Option<f64>, new:f64| -> (f64) {
+        match dest {
+            Some(x) => x.min(new),
+            None => new,
+        }
+    };
+
+    let maxf64 = |dest:&Option<f64>, new:f64| -> (f64) {
+        match dest {
+            Some(x) => x.max(new),
+            None => new,
+        }
+    };
+
+    let mut startdestpos = 0;
     if cfg.sum_fields.len() > 0 {
-        let start = 0;
-        for (i, index) in cfg.sum_fields.iter().enumerate() {
-            let place = i + start;
-            if *index < rec_len {
-                let v = &record[*index];
-                match v.as_ref().parse::<f64>() {
-                    Err(_) => {
-                        if cfg.verbose > 2 {
-                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
-                        }
-                    }
-                    Ok(vv) => match &mut brec.nums[place] {
-                        Some(x) => *x += vv,
-                        None => brec.nums[place] = Some(vv),
-                    }
-                }
-            }
-        }
+        mergefields(&cfg.sum_fields, startdestpos, "sum", &sumf64);
     }
-
     if cfg.min_num_fields.len() > 0 {
-        let start = cfg.sum_fields.len();
-        for (i, index) in cfg.min_num_fields.iter().enumerate() {
-            if *index < rec_len {
-                let dest = start + i;
-                let v = &record[*index];
-                match v.as_ref().parse::<f64>() {
-                    Err(_) => {
-                        if cfg.verbose > 2 {
-                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
-                        }
-                    }
-                    Ok(vv) => match &mut brec.nums[dest] {
-                        Some(x) => if vv < *x { *x = vv; },
-                        None => brec.nums[dest] = Some(vv),
-                    }
-                }
-            }
-        }
+        startdestpos += cfg.sum_fields.len();
+        mergefields(&cfg.min_num_fields, startdestpos, "min", &minf64);
     }
-
     if cfg.max_num_fields.len() > 0 {
-        let start = cfg.sum_fields.len() + cfg.min_num_fields.len();
-        for (i, index) in cfg.max_num_fields.iter().enumerate() {
-            if *index < rec_len {
-                let v = &record[*index];
-                let dest = start + i;
-                match v.as_ref().parse::<f64>() {
-                    Err(_) => {
-                        if cfg.verbose > 2 {
-                            eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
-                        }
-                    }
-                    Ok(vv) => match &mut brec.nums[dest] {
-                        Some(x) => if vv > *x { *x = vv; },
-                        None => brec.nums[dest] = Some(vv),
-                    }
-                }
-            }
-        }
+        startdestpos += cfg.min_num_fields.len();
+        mergefields(&cfg.min_num_fields, startdestpos, "max", &maxf64);
     }
 
     if cfg.avg_fields.len() > 0 {
@@ -155,6 +179,7 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
                 let v = &record[index];
                 match v.as_ref().parse::<f64>() {
                     Err(_) => {
+                        skipfields += 1;
                         if cfg.verbose > 2 {
                             eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
                         }
@@ -219,29 +244,28 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
         }
     }
 
-    fieldcount
+    (fieldcount,skipfields)
 }
-
 
 fn merge_f64<F>(x: Option<f64>, y: Option<f64>, pickone: F) -> Option<f64>
     where F: Fn(f64, f64) -> f64
 {
-    return match (x,y) {
-        (Some(old), Some(new)) => Some(pickone(new, old)),
+    return match (x, y) {
+        (Some(old), Some(new)) => Some(pickone(old, new)),
         (Some(old), None) => Some(old),
         (None, Some(new)) => Some(new),
         (_, _) => None,
-    }
+    };
 }
 
-fn merge_string<'a, F>(old: &'a mut Option<String>, new: &'a mut Option<String>, pickone:F) -> ()
+fn merge_string<'a, F>(old: &'a mut Option<String>, new: &'a mut Option<String>, pickone: F) -> ()
     where F: Fn(&'a mut Option<String>, &'a mut Option<String>)
 {
-    match (&old,&new) {
-        (Some(x), Some(y)) => pickone(new, old), //*new = old.take(), //f(new,old),
+    match (&old, &new) {
+        (Some(x), Some(y)) => pickone(old,new), //*new = old.take(), //f(new,old),
         (Some(x), None) => *new = old.take(),
-        (None, Some(new)) => {},
-        (_, _) => {},
+        (None, Some(new)) => {}
+        (_, _) => {}
     }
 }
 
@@ -249,8 +273,8 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
     let start = Instant::now();
     let lens = "NEEDTOFIXTHIS"; //join(maps.iter().map(|x:&MyMap| x.len().to_string()), ",");
 
-    // println!("map count: {}", maps.len());
-    // remove first map from list but keep / reuse it as a merge target
+// println!("map count: {}", maps.len());
+// remove first map from list but keep / reuse it as a merge target
     let mut p_map = maps.remove(0);
     use itertools::join;
     for i in 0..maps.len() {
@@ -262,24 +286,24 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
                 });
             new.count += old.count;
 
-            // need to provide proper sum, min, max operators
+// need to provide proper sum, min, max operators
 
             let mut start = 0;
             for (i, index) in cfg.sum_fields.iter().enumerate() {
                 let dest = start + i;
-                new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 {x + y});
+                new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 { x + y });
             }
 
             start += cfg.sum_fields.len();
             for (i, index) in cfg.min_num_fields.iter().enumerate() {
                 let dest = start + i;
-                new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 {x.min(y)});
+                new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 { x.min(y) });
             }
 
             start += cfg.min_num_fields.len();
             for (i, index) in cfg.max_num_fields.iter().enumerate() {
                 let dest = start + i;
-                new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 {x.max(y)});
+                new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 { x.max(y) });
             }
 
             for j in 0..old.avgs.len() {
