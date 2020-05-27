@@ -316,7 +316,7 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
             Err("No work to do! - you should specify at least one or more field options or a testre")?;
         }
         if cfg.re_path.is_some() {
-            if cfg.files.is_empty() && cfg.walk.is_none() {
+            if cfg.files.is_empty() && !cfg.stdin_file_list && cfg.walk.is_none() {
                 return Err("Cannot use a re_path setting with STDIN as input")?;
             }
             let _ = Regex::new(&cfg.re_path.as_ref().unwrap())?;
