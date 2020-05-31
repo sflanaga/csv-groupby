@@ -370,7 +370,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         where
             T: std::ops::Sub<Output=T> + std::ops::Add<Output=T> + From<usize>,
     {
-        (v + 1.into())
+        v + 1.into()
     }
     if do_ticker {
         eprintln!();

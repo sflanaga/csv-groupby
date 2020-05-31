@@ -1,9 +1,8 @@
-use std::io::prelude::*;
 use std::io::BufWriter;
 
 fn main() {
     let stdout = std::io::stdout();
-    let mut buffered = BufWriter::new(stdout.lock());
+    let _buffered = BufWriter::new(stdout.lock());
 
     // create test output for review
     let mut input_str = String::new();

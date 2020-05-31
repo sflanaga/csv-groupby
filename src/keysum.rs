@@ -34,7 +34,7 @@ impl KeySum {
     }
 }
 
-pub fn parse_and_merge_f64<T, F>(line: &str, record: &T, rec_len: usize, keysum: &mut KeySum, startpos: usize, fields: &Vec<usize>, cfg: &CliCfg, mergefield: F)
+pub fn parse_and_merge_f64<T, F>(_line: &str, record: &T, rec_len: usize, keysum: &mut KeySum, startpos: usize, fields: &Vec<usize>, cfg: &CliCfg, mergefield: F)
     where
         <T as std::ops::Index<usize>>::Output: AsRef<str>,
         T: std::ops::Index<usize> + std::fmt::Debug,
@@ -122,7 +122,7 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
 
     brec.count += 1;
 
-    let mut mergefields = |fields: &Vec<usize>, startpos: usize, comment: &str, mergefield: &Fn(&Option<f64>, f64) -> f64| -> () {
+    let mut mergefields = |fields: &Vec<usize>, startpos: usize, comment: &str, mergefield: &dyn Fn(&Option<f64>, f64) -> f64| -> () {
         for (i, index) in fields.iter().enumerate() {
             let place = i + startpos;
             let v = &record[*index].as_ref();
@@ -138,21 +138,21 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
         }
     };
 
-    let sumf64 = |dest:&Option<f64>, new:f64| -> (f64) {
+    let sumf64 = |dest:&Option<f64>, new:f64| -> f64 {
         match dest {
             Some(x) => *x + new,
             None => new,
         }
     };
 
-    let minf64 = |dest:&Option<f64>, new:f64| -> (f64) {
+    let minf64 = |dest:&Option<f64>, new:f64| -> f64 {
         match dest {
             Some(x) => x.min(new),
             None => new,
         }
     };
 
-    let maxf64 = |dest:&Option<f64>, new:f64| -> (f64) {
+    let maxf64 = |dest:&Option<f64>, new:f64| -> f64 {
         match dest {
             Some(x) => x.max(new),
             None => new,
@@ -262,9 +262,9 @@ fn merge_string<'a, F>(old: &'a mut Option<String>, new: &'a mut Option<String>,
     where F: Fn(&'a mut Option<String>, &'a mut Option<String>)
 {
     match (&old, &new) {
-        (Some(x), Some(y)) => pickone(old,new), //*new = old.take(), //f(new,old),
-        (Some(x), None) => *new = old.take(),
-        (None, Some(new)) => {}
+        (Some(_), Some(_)) => pickone(old,new), //*new = old.take(), //f(new,old),
+        (Some(_), None) => *new = old.take(),
+        (None, Some(_)) => {}
         (_, _) => {}
     }
 }
@@ -289,19 +289,19 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
 // need to provide proper sum, min, max operators
 
             let mut start = 0;
-            for (i, index) in cfg.sum_fields.iter().enumerate() {
+            for i in 0 .. cfg.sum_fields.len() {
                 let dest = start + i;
                 new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 { x + y });
             }
 
             start += cfg.sum_fields.len();
-            for (i, index) in cfg.min_num_fields.iter().enumerate() {
+            for i in 0 .. cfg.min_num_fields.len() {
                 let dest = start + i;
                 new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 { x.min(y) });
             }
 
             start += cfg.min_num_fields.len();
-            for (i, index) in cfg.max_num_fields.iter().enumerate() {
+            for i in 0 .. cfg.max_num_fields.len() {
                 let dest = start + i;
                 new.nums[dest] = merge_f64(old.nums[dest], new.nums[dest], |x, y| -> f64 { x.max(y) });
             }
@@ -312,7 +312,7 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
             }
 
             start = 0;
-            for (i, index) in cfg.min_str_fields.iter().enumerate() {
+            for i in 0 .. cfg.min_str_fields.len() {
                 let dest = start + i;
                 merge_string(&mut old.strs[dest], &mut new.strs[dest], |old, new| {
                     if old < new { *new = old.take(); }
@@ -320,7 +320,7 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
             }
 
             start += cfg.min_str_fields.len();
-            for (i, index) in cfg.max_str_fields.iter().enumerate() {
+            for i in 0 .. cfg.max_str_fields.len() {
                 let dest = start + i;
                 merge_string(&mut old.strs[dest], &mut new.strs[dest], |old, new| {
                     if old > new { *new = old.take(); }

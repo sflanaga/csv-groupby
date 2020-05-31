@@ -12,6 +12,7 @@ use pcre2::bytes::{Captures as Captures_pcre2, Regex as Regex_pre2};
 use std::fs::File;
 use flate2::read::GzDecoder;
 
+#[allow(dead_code)]
 pub fn distro_format<T,S>(map: &HashMap<T, usize, S>, upper: usize, bottom: usize) -> String
 where
     T: std::fmt::Display + std::fmt::Debug + std::clone::Clone + Ord,
@@ -434,7 +435,7 @@ pub fn per_file_thread(
                 Some(i) => String::from(&filename.to_str().unwrap()[i..]),
             }
         };
-        let mut rdr:Box<Read> = match &ext[..] {
+        let mut rdr:Box<dyn Read> = match &ext[..] {
             ".gz" => {
                 match File::open(&filename) {
                     Ok(f) => Box::new(BufReader::new(GzDecoder::new(f))),
@@ -506,6 +507,6 @@ pub fn get_reader_writer() -> (impl BufRead, impl Write) {
     let stdin = unsafe { File::from_raw_handle(std::io::stdin().as_raw_handle()) };
     let stdout = unsafe { File::from_raw_handle(std::io::stdout().as_raw_handle()) };
 
-    let (mut reader, mut writer) = (BufReader::new(stdin), BufWriter::new(stdout));
+    let (reader, writer) = (BufReader::new(stdin), BufWriter::new(stdout));
     (reader, writer)
 }
