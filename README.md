@@ -9,7 +9,7 @@ gb is a command that takes delimited data (like csv files) or lines of text (lik
 - Process files or stdin as a data source:
   - csv files
   - text/log where parsed fields come from regular expression sub groups
-  - files can be decompressed (like .zst, .gz, .xz, etc) data files on the fly
+  - fi  les can be decompressed (like .zst, .gz, .xz, etc) data files on the fly
   - recursive [--walk](https://github.com/BurntSushi/ripgrep/tree/master/ignore) directory trees and filter for only the files you want
 - Filenames (-p) parsed with regular expressions used in filtering can also have these sub groups used as fields.
 - Delimited output or prettytable format output
@@ -124,7 +124,7 @@ USAGE:
 
 FLAGS:
     -c, --csv_output
-            Write delimited output summary instead of auto-aligned table output
+            Write delimited output summary instead of auto-aligned table output.  Use -o to change the delimiter.
 
     -v
             Verbosity - use more than one v for greater detail
@@ -142,13 +142,13 @@ FLAGS:
             read a list of files to parse from stdin
 
         --stats
-            list of input files, defaults to stdin
+            write final stats after processing
 
         --no_output
             do not write summary output - used for benchmarking and tuning - not useful to you
 
-        --recycle_io_blocks
-            reuses data allocated for IO blocks - not necessarily faster
+        --recycle_io_blocks_disable
+            disable reusing io blocks - might help performance in some situations?
 
         --disable_key_sort
             disables the key sort
@@ -164,7 +164,7 @@ FLAGS:
 
 OPTIONS:
     -R, --test_re <testre>
-            Test a regular expression against strings - best surrounded by quotes
+            Test a regular expression against strings - use shell quotes/escape for special stuff
 
     -L, --test_line <testline>...
             Line(s) of text to test - best surrounded by quotes
@@ -187,8 +187,20 @@ OPTIONS:
     -s, --sum_values <sumfield>...
             Field to sum as float64s - base index 1
 
-    -a, --avg_values <avgfield>...
+    -a, --avg_values <avg_fields>...
             Field to average if parseable number values found - base index 1
+
+    -x, --max_nums <max_num_fields>...
+            Field to find max as float64s - base index 1
+
+    -n, --min_nums <min_num_fields>...
+            Field to find max as float64s - base index 1
+
+    -X, --max_strings <max_str_fields>...
+            Field to find max as string - base index 1
+
+    -N, --min_strings <min_str_fields>...
+            Field to find max as string - base index 1
 
     -r, --regex <re-str>...
             Regex mode regular expression
@@ -202,23 +214,36 @@ OPTIONS:
             Parse the path of the file to and process only those that match. If the matches have sub groups, then use
             those strings as parts to summarized. This works in CSV mode as well as Regex mode, but not while parsing
             STDIO
-    -C, --re_line_contains <re-line-contains>
+        --re_line_contains <re-line-contains>
             Gives a hint to regex mode to presearch a line before testing regex. This may speed up regex mode
-            significantly if the lines you match on are a minority to the whole
+            significantly if the lines you match on are a minority to the whole.
     -d, --input_delimiter <delimiter>
-            Delimiter if in csv mode [default: ,]
+            Delimiter if in csv mode Note:  \t == <tab>  \0 == <null>  \dVAL where VAL is decimal number for ascii from
+            0 to 127
+
+            Did you know that you can escape tabs and other special characters? bash use -d $'\t' power shell use -d `t
+            note it's the other single quote cmd.exe  use cmd.exe /f:off and type -d "<TAB>" But \t \0 \d11 are there
+            where 11 [default: ,]
+    -q, --quote <quote>
+            csv quote character for fields that might contain the delimiter
+
+    -e, --escape <escape>
+            csv escape character for the quote character
+
+    -C, --comment <comment>
+            csv escape character for the quote character
 
     -o, --output_delimiter <outputdelimiter>
             Output delimiter for written summaries [default: ,]
 
-    -e, --empty_string <empty>
+        --empty_string <empty>
             Empty string substitution - default is "" empty/nothing/notta [default: ]
 
-    -n, --worker_threads <no-threads>
-            Number of csv or re parsing threads - defaults to up to 12 if you have that many CPUs [default: 12]
+    -t, --worker_threads <no-threads>
+            Number of csv or re parsing threads - defaults to up to 12 if you have that many CPUs [default: 4]
 
-    -q, --queue_size <thread-qsize>
-            Length of queue between IO block reading and parsing threads [default: 48]
+        --queue_size <thread-qsize>
+            Length of queue between IO block reading and parsing threads [default: 16]
 
         --block_size_k <block-size-k>
             Size of the IO block "K" (1024 bytes) used between reading thread and parser threads [default: 256]
@@ -234,7 +259,9 @@ OPTIONS:
 
     -w, --walk <walk>
             recursively walk a tree of files to parse
-            
+
+        --null_write <nullstring>
+            What to write when we do not have a value at all.  null = I do not know [default: NULL]
             
 TODO/ideas:  
 

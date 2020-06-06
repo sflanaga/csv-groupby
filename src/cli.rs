@@ -201,9 +201,9 @@ pub struct CliCfg {
     /// do not write summary output - used for benchmarking and tuning - not useful to you
     pub no_output: bool,
 
-    #[structopt(long = "recycle_io_blocks")]
-    /// reuses data allocated for IO blocks - not necessarily faster
-    pub recycle_io_blocks: bool,
+    #[structopt(long = "recycle_io_blocks_disable")]
+    /// disable reusing io blocks - might help performance in some situations?
+    pub recycle_io_blocks_disable: bool,
 
     #[structopt(long = "disable_key_sort")]
     /// disables the key sort

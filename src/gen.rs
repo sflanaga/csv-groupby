@@ -252,9 +252,9 @@ fn fill_buff(handle: &mut dyn Read, buff: &mut [u8]) -> Result<usize, std::io::E
 pub fn io_thread_slicer(
     recv_blocks: &crossbeam_channel::Receiver<Vec<u8>>,
     currfilename: &dyn Display,
-	file_subgrps: &[String],
+    file_subgrps: &[String],
     block_size: usize,
-    recycle_io_blocks: bool,
+    recycle_io_blocks_disable: bool,
     verbosity: usize,
     handle: &mut dyn Read,
     status: &mut Arc<IoSlicerStatus>,
@@ -279,7 +279,7 @@ pub fn io_thread_slicer(
     let mut last_left_len;
     let mut curr_pos = 0usize;
     loop {
-        let mut block = if recycle_io_blocks { recv_blocks.recv()? } else { vec![0u8; block_size] };
+        let mut block = if !recycle_io_blocks_disable { recv_blocks.recv()? } else { vec![0u8; block_size] };
         if left_len > 0 {
             block[0..left_len].copy_from_slice(&holdover[0..left_len]);
         }
@@ -389,14 +389,14 @@ pub fn subs_from_path_buff(path: &PathBuf, regex: &Option<Regex_pre2>) -> (bool,
 }
 
 pub fn per_file_thread(
-    recycle_io_blocks: bool,
+    recycle_io_blocks_disable: bool,
     recv_blocks: &crossbeam_channel::Receiver<Vec<u8>>,
     recv_pathbuff: &crossbeam_channel::Receiver<Option<PathBuf>>,
     send_fileslice: &crossbeam_channel::Sender<Option<FileSlice>>,
     block_size: usize,
     verbosity: usize,
     mut io_status: Arc<IoSlicerStatus>,
-	path_re: &Option<Regex_pre2>,
+    path_re: &Option<Regex_pre2>,
 ) -> (usize, usize) {
     let mut block_count = 0usize;
     let mut bytes = 0usize;
@@ -475,9 +475,9 @@ pub fn per_file_thread(
         match io_thread_slicer(
             &recv_blocks,
             &filename.display(),
-			&file_subgrps,
+            &file_subgrps,
             block_size,
-            recycle_io_blocks,
+            recycle_io_blocks_disable,
             verbosity,
             &mut rdr,
             &mut io_status,

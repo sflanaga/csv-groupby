@@ -176,7 +176,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (send_blocks, recv_blocks): (crossbeam_channel::Sender<Vec<u8>>, crossbeam_channel::Receiver<Vec<u8>>) = crossbeam_channel::unbounded();
-    if cfg.recycle_io_blocks {
+    if !cfg.recycle_io_blocks_disable {
         for _ in 0..cfg.thread_qsize {
             let ablock = vec![0u8; block_size];
             send_blocks.send(ablock)?;
@@ -221,7 +221,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             .name(format!("worker_io{}", no_threads))
             .spawn(move || {
                 per_file_thread(
-                    clone_cfg.recycle_io_blocks,
+                    clone_cfg.recycle_io_blocks_disable,
                     &clone_recv_blocks,
                     &clone_recv_pathbuff,
                     &clone_send_fileslice,
@@ -290,7 +290,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             &"STDIO".to_string(),
             &empty_vec,
             block_size,
-            cfg.recycle_io_blocks,
+            cfg.recycle_io_blocks_disable,
             cfg.verbose,
             &mut handle,
             &mut io_status,
@@ -746,7 +746,7 @@ fn _worker_re(
                 }
             }
         }
-        if cfg.recycle_io_blocks {
+        if !cfg.recycle_io_blocks_disable {
             send_blocks.send(fc.block)?;
         }
     }
@@ -830,7 +830,7 @@ fn _worker_csv(
                 }
             }
         }
-        if cfg.recycle_io_blocks {
+        if !cfg.recycle_io_blocks_disable {
             send_blocks.send(fc.block)?;
         }
     }
@@ -961,7 +961,7 @@ fn _worker_multi_re(
                 }
             }
         }
-        if cfg.recycle_io_blocks {
+        if !cfg.recycle_io_blocks_disable {
             send_blocks.send(fc.block)?;
         }
     }
