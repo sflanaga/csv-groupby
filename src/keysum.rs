@@ -271,7 +271,7 @@ fn merge_string<'a, F>(old: &'a mut Option<String>, new: &'a mut Option<String>,
 
 pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
     let start = Instant::now();
-    let lens = "NEEDTOFIXTHIS"; //join(maps.iter().map(|x:&MyMap| x.len().to_string()), ",");
+    let lens = join(maps.iter().map(|x:&MyMap| x.len().to_string()), ",");
 
 // println!("map count: {}", maps.len());
 // remove first map from list but keep / reuse it as a merge target
