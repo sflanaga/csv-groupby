@@ -28,91 +28,104 @@ lazy_static! {
 #[structopt(
     global_settings(&[structopt::clap::AppSettings::ColoredHelp, structopt::clap::AppSettings::VersionlessSubcommands, structopt::clap::AppSettings::DeriveDisplayOrder]),
     //raw(setting = "structopt::clap::AppSettings::DeriveDisplayOrder"),
-    author, about
 )]
+/// Execute a sql-like group-by on arbitrary text or csv files. Field index base 1.
+/// v: 0.7.2 by Steve Flanagan // github.com/sflanaga/csv-groupby
 pub struct CliCfg {
-    #[structopt(short = "R", long = "test_re", name = "testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield", "avgfield"])]
-    /// Test a regular expression against strings - use shell quotes/escape for special stuff
+    #[structopt(short = "R", long = "test_re", name = "testre", conflicts_with_all = & ["keyfield", "uniquefield", "sumfield", "avgfield"])]
+    /// Test a regular expression against strings
+    ///
+    /// Use shell quotes/escape for special stuff
     pub testre: Option<String>,
 
-    #[structopt(short = "L", long = "test_line", name = "testline", requires="testre", conflicts_with_all = &["keyfield", "uniquefield", "sumfield", "avgfield"])]
-    /// Line(s) of text to test - best surrounded by quotes
+    #[structopt(short = "L", long = "test_line", name = "testline", requires = "testre", conflicts_with_all = & ["keyfield", "uniquefield", "sumfield", "avgfield"])]
+    /// Line(s) of text to test
+    ///
+    /// Best surrounded by quotes
     pub testlines: Vec<String>,
 
     #[structopt(short = "k", long = "key_fields", name = "keyfield", use_delimiter(true), conflicts_with = "testre", min_values(1))]
-    /// Fields that will act as group by keys - base index 1
+    /// Fields that will act as group by keys
     pub key_fields: Vec<usize>,
 
     #[structopt(short = "u", long = "unique_values", name = "uniquefield", use_delimiter(true), min_values(1))]
-    /// Fields to count distinct - base index 1
+    /// Fields to count distinct
     pub unique_fields: Vec<usize>,
 
     #[structopt(long = "write_distros", name = "writedistros", use_delimiter(true))]
-    /// for certain unique_value fields, write a partial distribution of value x count from highest to lowers
+    /// write unique value distro with -u option
+    ///
+    /// Writes values x count to highest and lowest common values
     pub write_distros: Vec<usize>,
 
     #[structopt(long = "write_distros_upper", name = "writedistrosupper", use_delimiter(true), default_value = "5")]
-    /// number of distros to write with the highest counts
+    /// number highest value x count
+    ///
+    /// This is the top N entries of to write in write_distros
     pub write_distros_upper: usize,
 
     #[structopt(long = "write_distros_bottom", name = "writedistrobottom", use_delimiter(true), default_value = "2")]
-    /// number of distros to write with the lowest counts
+    /// number lowest value x count
+    ///
+    /// This is the top N entries of to write with write_distros
     pub write_distros_bottom: usize,
 
     #[structopt(short = "s", long = "sum_values", name = "sumfield", use_delimiter(true), min_values(1))]
-    /// Field to sum as float64s - base index 1
+    /// Sum fields as float64s
     pub sum_fields: Vec<usize>,
 
     #[structopt(short = "a", long = "avg_values", name = "avg_fields", use_delimiter(true), min_values(1))]
-    /// Field to average if parseable number values found - base index 1
+    /// Average fields
     pub avg_fields: Vec<usize>,
 
     #[structopt(short = "x", long = "max_nums", name = "max_num_fields", use_delimiter(true), min_values(1))]
-    /// Field to find max as float64s - base index 1
+    /// Max fields as float64s
     pub max_num_fields: Vec<usize>,
 
     #[structopt(short = "n", long = "min_nums", name = "min_num_fields", use_delimiter(true), min_values(1))]
-    /// Field to find max as float64s - base index 1
+    /// Min fields as float64
     pub min_num_fields: Vec<usize>,
 
     #[structopt(short = "X", long = "max_strings", name = "max_str_fields", use_delimiter(true), min_values(1))]
-    /// Field to find max as string - base index 1
+    /// Max field as string
     pub max_str_fields: Vec<usize>,
 
     #[structopt(short = "N", long = "min_strings", name = "min_str_fields", use_delimiter(true), min_values(1))]
-    /// Field to find max as string - base index 1
+    /// Field to find max as string
     pub min_str_fields: Vec<usize>,
 
     #[structopt(short = "r", long = "regex", conflicts_with = "delimiter")]
-    /// Regex mode regular expression
+    /// Regex mode regular expression to parse fields
     ///
     /// Several -r <RE> used?  Experimental.  Notes:
     /// If more than one -r RE is specified, then it will switch to multiline mode.
     /// This will allow only a single RE parser thread and will slow down progress
-    /// significantly, but will create a virtual record across each line that matches.
-    /// They must match in order and only the first match of each will have it's
+    /// significantly, but will create a virtual record across successive lines that match.
+    /// They must match in order and only the first match of each RE will have it's
     /// sub groups captured and added to the record.  Only when the last RE is matched
     /// will results be captured, and at this point it will start looking for the first
-    /// RE to match again.
+    /// RE to match again.  This will NOT work for something like xml unless that xml
+    /// is very regularly formatted across lines.
     pub re_str: Vec<String>,
 
     #[structopt(short = "p", long = "path_re")]
-    /// Parse the path of the file to and process only those that match.
+    /// Match path on files and get fields from sub groups
+    ///
     /// If the matches have sub groups, then use those strings as parts to summarized.
     /// This works in CSV mode as well as Regex mode, but not while parsing STDIO
     pub re_path: Option<String>,
 
     #[structopt(long = "re_line_contains")]
+    /// Grep lines that must contain a string
+    ///
     /// Gives a hint to regex mode to presearch a line before testing regex.
-    /// This may speed up regex mode significantly if the lines you match on are a minority to the whole.
+    /// This may speed up regex mode significantly as it is a simple contains check
+    /// if the lines you match on are a minority to the whole.
     pub re_line_contains: Option<String>,
 
-//    #[structopt(long = "fullmatch_as_field")]
-//    /// Using whole regex match as 0th field - adds 1 to all others
-//    pub fullmatch_as_field: bool,
-
-    #[structopt(short = "d", long = "input_delimiter", name = "delimiter", parse(try_from_str = escape_parser), default_value = ",", conflicts_with_all = &["regex"])]
+    #[structopt(short = "d", long = "input_delimiter", name = "delimiter", parse(try_from_str = escape_parser), default_value = ",", conflicts_with_all = & ["regex"])]
     /// Delimiter if in csv mode
+    ///
     /// Note:  \t == <tab>  \0 == <null>  \dVAL where VAL is decimal number for ascii from 0 to 127
     ///
     /// Did you know that you can escape tabs and other special characters?
@@ -122,87 +135,113 @@ pub struct CliCfg {
     /// But \t \0 \d11 are there where 11
     pub delimiter: char,
 
-    #[structopt(short = "q", long = "quote", name = "quote", parse(try_from_str = escape_parser), conflicts_with_all = &["regex"])]
-    /// csv quote character for fields that might contain the delimiter
+    #[structopt(short = "q", long = "quote", name = "quote", parse(try_from_str = escape_parser), conflicts_with_all = & ["regex"])]
+    /// csv quote character
+    ///
+    /// For delimiter mode only.  Use if fields might contain the delimiter
     pub quote: Option<char>,
 
-    #[structopt(short = "e", long = "escape", name = "escape", requires="quote", parse(try_from_str = escape_parser), conflicts_with_all = &["regex"])]
-    /// csv escape character for the quote character
+    #[structopt(short = "e", long = "escape", name = "escape", requires = "quote", parse(try_from_str = escape_parser), conflicts_with_all = & ["regex"])]
+    /// csv escape character
+    ///
+    /// Use this if quoted field might contain the quote character.
     pub escape: Option<char>,
 
-    #[structopt(short = "C", long = "comment", name = "comment", parse(try_from_str = escape_parser), conflicts_with_all = &["regex"])]
-    /// csv escape character for the quote character
+    #[structopt(short = "C", long = "comment", name = "comment", parse(try_from_str = escape_parser), conflicts_with_all = & ["regex"])]
+    /// csv mode comment character
+    ///
+    /// This only works IF the comment character is the first character of a line.
     pub comment: Option<char>,
 
     #[structopt(short = "o", long = "output_delimiter", name = "outputdelimiter", default_value = ",")]
     /// Output delimiter for written summaries
     pub od: String,
+
     #[structopt(short = "c", long = "csv_output")]
-    /// Write delimited output summary instead of auto-aligned table output.  Use -o to change the delimiter.
+    /// Write delimited output
+    ///
+    /// Default is to write auto-aligned table output.  Use -o to change the delimiter.
     pub csv_output: bool,
 
     #[structopt(short = "v", parse(from_occurrences))]
     /// Verbosity - use more than one v for greater detail
     pub verbose: usize,
+
     #[structopt(long = "skip_header")]
-    /// Skip the first (header) line of input for each file or all of stdin
+    /// Skip the first (header) line
+    ///
+    ///TODO: add option for the number of lines
     pub skip_header: bool,
 
     #[structopt(long = "no_record_count")]
-    /// Do not write counts for each group by key tuple
+    /// Do not write records
     pub no_record_count: bool,
 
     #[structopt(long = "empty_string", default_value = "")]
-    /// Empty string substitution - default is "" empty/nothing/notta
+    /// Empty string substitution
+    ///
+    /// This is different from NULLs where nothing is known - not even an empty string
     pub empty: String,
 
-    #[structopt(short = "t", long = "worker_threads", default_value(&DEFAULT_THREAD_NO))]
-    /// Number of csv or re parsing threads - defaults to up to 12 if you have that many CPUs
+    #[structopt(short = "t", long = "worker_threads", default_value(& DEFAULT_THREAD_NO))]
+    /// Number of parser threads
+    ///
+    /// This applies to csv and re parsing modes.  This is also the number of IO threads if
+    /// more than one files is being procseed.
     pub no_threads: u64,
 
-    #[structopt(long = "queue_size", default_value(&DEFAULT_QUEUE_SIZE))]
-    /// Length of queue between IO block reading and parsing threads
+    #[structopt(long = "queue_size", default_value(& DEFAULT_QUEUE_SIZE))]
+    /// Queue length of blocks between threads
     pub thread_qsize: usize,
 
     #[structopt(long = "noop_proc")]
-    /// do no real work - used for testing IO
+    /// Do no real work
+    ///
+    /// Used to test IO throughput
     pub noop_proc: bool,
 
-    #[structopt(long = "block_size_k", default_value = "256")]
-    /// Size of the IO block "K" (1024 bytes) used between reading thread and parser threads
+    #[structopt(long = "block_size_k", default_value = "256", conflicts_with = "block_size_b")]
+    /// K size of the IO blocks
+    ///
+    /// "K" (1024 bytes) used between reading thread and parser threads
     pub block_size_k: usize,
 
-    #[structopt(long = "block_size_B", default_value = "0")]
-    /// Block size for IO to queue used for testing really small blocks
-    /// and possible related that might occurr
+    #[structopt(long = "block_size_B", default_value = "0", conflicts_with = "block_size_K")]
+    /// byte size of the IO blocks
     pub block_size_b: usize,
 
-    #[structopt(short = "l", name = "file_list", parse(from_os_str), conflicts_with_all = &["walk", "stdin_file_list", "file"])]
+    #[structopt(short = "l", name = "file_list", parse(from_os_str), conflicts_with_all = & ["walk", "stdin_file_list", "file"])]
     /// file containing a list of input files
     pub file_list: Option<PathBuf>,
 
-    #[structopt(short = "i", name = "stdin_file_list", conflicts_with_all = &["walk", "file_list", "file"])]
-    /// read a list of files to parse from stdin
+    #[structopt(short = "i", name = "stdin_file_list", conflicts_with_all = & ["walk", "file_list", "file"])]
+    /// read a list of to parse files from stdin
     pub stdin_file_list: bool,
 
-    #[structopt(short = "f", name = "file", parse(from_os_str), conflicts_with_all = &["walk", "file_list", "stdin_file_list"])]
+    #[structopt(short = "f", name = "file", parse(from_os_str), conflicts_with_all = & ["walk", "file_list", "stdin_file_list"])]
     /// list of input files, defaults to stdin
     pub files: Vec<PathBuf>,
 
-    #[structopt(short = "w", long = "walk", name = "walk", conflicts_with_all = &["file", "file_list", "stdin_file_list"])]
+    #[structopt(short = "w", long = "walk", name = "walk", conflicts_with_all = & ["file", "file_list", "stdin_file_list"])]
     /// recursively walk a tree of files to parse
+    ///
+    /// This can be used with option path_re to limit what files a parsed
     pub walk: Option<String>,
 
     #[structopt(long = "stats")]
-    /// write final stats after processing
+    /// Write stats after processing
     pub stats: bool,
 
     #[structopt(long = "no_output")]
-    /// do not write summary output - used for benchmarking and tuning - not useful to you
+    /// do not write summary output
+    ///
+    /// Used for benchmarking and tuning - not useful to you
     pub no_output: bool,
 
     #[structopt(long = "recycle_io_blocks_disable")]
-    /// disable reusing io blocks - might help performance in some situations?
+    /// disable reusing memory io blocks
+    ///
+    /// This might help performance in some situations such a parsing single smaller files.
     pub recycle_io_blocks_disable: bool,
 
     #[structopt(long = "disable_key_sort")]
@@ -213,9 +252,34 @@ pub struct CliCfg {
     /// would sort things
     pub disable_key_sort: bool,
 
-    #[structopt(long = "null_write", name = "nullstring", default_value="NULL")]
-    /// What to write when we do not have a value at all.  null = I do not know
+    #[structopt(long = "null_write", name = "nullstring", default_value = "NULL")]
+    /// String to use for NULL fields
     pub null: String,
+
+    #[structopt(short = "E", long = "print_examples")]
+    /// String to use for NULL fields
+    pub print_examples: bool,
+}
+
+fn print_examples() {
+    println!("{}",
+    r#"
+    Here are a few examples for quick reference
+
+    File sources:
+
+    cat it.csv | gb -k 1,2 -s 4  # reads from standard-in
+    find . | gb -i ....          # reads from files from standard in
+    gb -f file1 fil2....         # read from specified files
+    gb -l <file_list> ....       # reads from files in a list file
+    gb -w /some/path -p '.*.csv' # read all files under directory that end in .csv
+    Fields:
+
+    gb -f file1 -k 2 -s 3 -a 4 -u 5 --write_distros 5
+    # reads csv file1 and does a select.. group by 2
+    # sum field 3;  avg field 4; write value count distro for field 5
+
+    "#);
 }
 
 fn escape_parser(s: &str) -> Result<char> {
@@ -267,6 +331,10 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
     // but then put into to th Arc as immutable
     let cfg = Arc::new({
         let mut cfg: CliCfg = CliCfg::from_args();
+        if cfg.print_examples {
+            print_examples();
+            std::process::exit(1);
+        }
         if cfg.re_str.len() > 1 {
             cfg.no_threads = 1;
             if cfg.verbose >= 1 {
@@ -316,8 +384,8 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
             Err("No work to do! - you should specify at least one or more field options or a testre")?;
         }
         if cfg.re_path.is_some() {
-            if cfg.files.is_empty() && !cfg.stdin_file_list && cfg.walk.is_none() {
-                return Err("Cannot use a re_path setting with STDIN as input")?;
+            if cfg.files.is_empty() && cfg.file_list.is_none() && !cfg.stdin_file_list && cfg.walk.is_none()  {
+                return Err("Cannot use a re_path setting with STDIN as input.")?;
             }
             let _ = Regex::new(&cfg.re_path.as_ref().unwrap())?;
         }
