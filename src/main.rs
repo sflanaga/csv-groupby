@@ -3,7 +3,7 @@
 
 use atty::Stream;
 use pcre2::bytes::{CaptureLocations as CaptureLocations_pcre2, Captures as Captures_pcre2, Regex as Regex_pre2};
-use prettytable::{cell::Cell, format, row::Row, Table};
+use prettytable::{Cell, format, Row, Table};
 use regex::{CaptureLocations, Regex};
 use std::alloc::System;
 use std::{
