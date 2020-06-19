@@ -209,7 +209,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
     // IO slicer threads
     let mut io_handler = vec![];
-    let (send_pathbuff, recv_pathbuff): (crossbeam_channel::Sender<Option<PathBuf>>, crossbeam_channel::Receiver<Option<PathBuf>>) = crossbeam_channel::bounded(cfg.thread_qsize);
+    let (send_pathbuff, recv_pathbuff): (crossbeam_channel::Sender<Option<PathBuf>>, crossbeam_channel::Receiver<Option<PathBuf>>) =
+        if cfg.path_qsize > 0 {
+            crossbeam_channel::unbounded()
+        } else {
+            crossbeam_channel::bounded(cfg.thread_qsize)
+        };
+
     for no_threads in 0..cfg.no_threads {
         let clone_cfg = cfg.clone();
         let clone_recv_pathbuff = recv_pathbuff.clone();

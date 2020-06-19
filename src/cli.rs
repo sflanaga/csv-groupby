@@ -194,6 +194,10 @@ pub struct CliCfg {
     /// Queue length of blocks between threads
     pub thread_qsize: usize,
 
+    #[structopt(long = "path_qsize", default_value("0"))]
+    /// Queue length of blocks between threads
+    pub path_qsize: usize,
+
     #[structopt(long = "noop_proc")]
     /// Do no real work
     ///
