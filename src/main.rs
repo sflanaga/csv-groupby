@@ -84,7 +84,9 @@ fn main() {
     }
 }
 
-fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>, send: &crossbeam_channel::Sender<Option<FileSlice>>) {
+fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>,
+               send: &crossbeam_channel::Sender<Option<FileSlice>>,
+               filesend: &crossbeam_channel::Sender<Option<PathBuf>> ) {
     let start_f = Instant::now();
     let startcpu = ProcessTime::now();
 
@@ -112,9 +114,10 @@ fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, status: &mut A
             eprint!(
                 "{}",
                 format!(
-                    " q: {}/{}  {}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}  mem: {}{}",
+                    " q: {}/{}/{}  {}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}  mem: {}{}",
                     send.len(),
                     file_count,
+                    filesend.len(),
                     mem_metric_digit(total_bytes, 4),
                     mem_metric_digit(rate, 4),
                     sec,
@@ -251,8 +254,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         if do_ticker {
             let mut io_status_cloned = io_status.clone();
             let clone_send = send_fileslice.clone();
+            let clone_pathsend = send_pathbuff.clone();
             let verbose = cfg.verbose;
-            Some(thread::spawn(move || stat_ticker(verbose, thread_stopper, &mut io_status_cloned, &clone_send)))
+            Some(thread::spawn(move || stat_ticker(verbose, thread_stopper, &mut io_status_cloned, &clone_send, &clone_pathsend)))
         } else {
             None
         }
