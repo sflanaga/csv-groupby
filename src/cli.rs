@@ -195,7 +195,7 @@ pub struct CliCfg {
     pub thread_qsize: usize,
 
     #[structopt(long = "path_qsize", default_value("0"))]
-    /// Queue length of blocks between threads
+    /// Queue length of paths to IO slicer threads
     pub path_qsize: usize,
 
     #[structopt(long = "noop_proc")]
