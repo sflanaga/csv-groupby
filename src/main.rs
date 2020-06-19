@@ -214,9 +214,9 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let mut io_handler = vec![];
     let (send_pathbuff, recv_pathbuff): (crossbeam_channel::Sender<Option<PathBuf>>, crossbeam_channel::Receiver<Option<PathBuf>>) =
         if cfg.path_qsize > 0 {
-            crossbeam_channel::unbounded()
-        } else {
             crossbeam_channel::bounded(cfg.thread_qsize)
+        } else {
+            crossbeam_channel::unbounded()
         };
 
     for no_threads in 0..cfg.no_threads {
