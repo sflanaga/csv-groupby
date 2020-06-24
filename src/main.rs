@@ -23,6 +23,7 @@ mod gen;
 mod mem;
 mod testre;
 mod keysum;
+mod gettid;
 
 
 use cli::{get_cli, CliCfg};

@@ -50,6 +50,13 @@ path = "src/append.rs"
 jemallocator = "0.3.2"
 jemalloc-ctl = "0.3.3"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winapi = { version = "0.3", features = ["processthreadsapi"] }
+
+
 [dependencies]
 #structopt = {version = "0.2.18", feature=["color","termsize","wrap_help"]}
 structopt = {version = "0.3.1", feature=["color","termsize","wrap_help"]}

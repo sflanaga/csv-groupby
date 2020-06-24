@@ -426,9 +426,9 @@ pub fn per_file_thread(
                 continue;
             }
         };
-
+        use crate::gettid::gettid;
         if verbosity >= 1 {
-            eprintln!("processing file: {}", filename.display());
+            eprintln!("thread id: {} processing file: {}", gettid(), filename.display());
         }
 
         let ext = {
