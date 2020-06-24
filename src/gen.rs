@@ -13,9 +13,9 @@ use std::fs::File;
 use flate2::read::GzDecoder;
 
 #[allow(dead_code)]
-pub fn distro_format<T,S>(map: &HashMap<T, usize, S>, upper: usize, bottom: usize) -> String
-where
-    T: std::fmt::Display + std::fmt::Debug + std::clone::Clone + Ord,
+pub fn distro_format<T, S>(map: &HashMap<T, usize, S>, upper: usize, bottom: usize) -> String
+    where
+        T: std::fmt::Display + std::fmt::Debug + std::clone::Clone + Ord,
 {
     let mut vec: Vec<(usize, T)> = Vec::with_capacity(map.len());
     for x in map.iter() {
@@ -49,6 +49,7 @@ where
     }
     msg
 }
+
 #[test]
 fn test_distro_format() {
     let mut v: HashMap<String, usize> = HashMap::new();
@@ -127,7 +128,7 @@ pub fn mem_metric_digit(v: usize, sig: usize) -> String {
         return format!("{:>width$}", "unknown", width = sig + 3);
     }
     let vt = mem_metric(v);
-    format!("{:>width$} {}", sig_dig(vt.0, sig), vt.1, width = sig + 1,)
+    format!("{:>width$} {}", sig_dig(vt.0, sig), vt.1, width = sig + 1, )
 }
 
 #[test]
@@ -192,6 +193,7 @@ pub fn greek(v: f64) -> String {
     // 	_ => v,
     // }
 }
+
 pub fn user_pause() {
     println!("hi enter to continue...");
     let mut buf: [u8; 1] = [0; 1];
@@ -223,7 +225,7 @@ pub struct FileSlice {
     pub len: usize,
     pub index: usize,
     pub filename: String,
-	pub sub_grps: Vec<String>,
+    pub sub_grps: Vec<String>,
 }
 
 fn fill_buff(handle: &mut dyn Read, buff: &mut [u8]) -> Result<usize, std::io::Error> {
@@ -246,7 +248,6 @@ fn fill_buff(handle: &mut dyn Read, buff: &mut [u8]) -> Result<usize, std::io::E
             sz += sz2;
         }
     }
-
 }
 
 pub fn io_thread_slicer(
@@ -285,7 +286,7 @@ pub fn io_thread_slicer(
         }
         let (expected_sz, sz) = {
             let expected_sz = block.len() - left_len;
-            let sz = fill_buff(handle, &mut block[left_len..])?; 
+            let sz = fill_buff(handle, &mut block[left_len..])?;
             (expected_sz, sz)
         };
 
@@ -321,12 +322,12 @@ pub fn io_thread_slicer(
                     len: sz + last_left_len,
                     index: block_count,
                     filename: currfilename.to_string(),
-					sub_grps: file_subgrps.to_vec(),
+                    sub_grps: file_subgrps.to_vec(),
                 }))?;
                 status.bytes.fetch_add(sz, Ordering::Relaxed);
                 bytes += sz;
 
-            // panic!("Cannot find end line marker in current block at pos {} from file {}", curr_pos, currfilename);
+                // panic!("Cannot find end line marker in current block at pos {} from file {}", curr_pos, currfilename);
             } else {
                 last_left_len = left_len;
                 left_len = (sz + last_left_len) - (end + 1);
@@ -340,7 +341,7 @@ pub fn io_thread_slicer(
                     len: end + 1,
                     index: block_count,
                     filename: currfilename.to_string(),
-					sub_grps: file_subgrps.to_vec(),
+                    sub_grps: file_subgrps.to_vec(),
                 }))?;
                 status.bytes.fetch_add(end + 1, Ordering::Relaxed);
                 bytes += end + 1;
@@ -354,7 +355,7 @@ pub fn io_thread_slicer(
                 len: left_len,
                 index: block_count,
                 filename: currfilename.to_string(),
-				sub_grps: file_subgrps.to_vec(),
+                sub_grps: file_subgrps.to_vec(),
             }))?;
             bytes += left_len;
             status.bytes.fetch_add(left_len, Ordering::Relaxed);
@@ -366,26 +367,26 @@ pub fn io_thread_slicer(
 }
 
 pub fn caps_to_vec_strings(caps: &Captures_pcre2) -> Vec<String> {
-	let mut v = vec![];
-	for x in 1 .. caps.len() {
+    let mut v = vec![];
+    for x in 1..caps.len() {
         let y = caps.get(x).unwrap().as_bytes();
         let ss = String::from_utf8(y.to_vec()).unwrap();
-		v.push( ss);
-	}
-	v
+        v.push(ss);
+    }
+    v
 }
 
 pub fn subs_from_path_buff(path: &PathBuf, regex: &Option<Regex_pre2>) -> (bool, Vec<String>) {
-	let v = vec![];
-	match regex {
-		None => (true,v),
-		Some(re) => {
-			match re.captures(path.to_str().unwrap().as_bytes()) {
-				Ok(Some(caps)) => (true, caps_to_vec_strings(&caps)),
-				_ => (false, v)
-			}
-		}
-	}
+    let v = vec![];
+    match regex {
+        None => (true, v),
+        Some(re) => {
+            match re.captures(path.to_str().unwrap().as_bytes()) {
+                Ok(Some(caps)) => (true, caps_to_vec_strings(&caps)),
+                _ => (false, v)
+            }
+        }
+    }
 }
 
 pub fn per_file_thread(
@@ -393,6 +394,7 @@ pub fn per_file_thread(
     recv_blocks: &crossbeam_channel::Receiver<Vec<u8>>,
     recv_pathbuff: &crossbeam_channel::Receiver<Option<PathBuf>>,
     send_fileslice: &crossbeam_channel::Sender<Option<FileSlice>>,
+    io_block_size: usize,
     block_size: usize,
     verbosity: usize,
     mut io_status: Arc<IoSlicerStatus>,
@@ -411,11 +413,11 @@ pub fn per_file_thread(
             }
         };
         if verbosity > 2 { eprintln!("considering path: {}", filename.display()); }
-		let (file_matched, file_subgrps) = subs_from_path_buff(&filename, &path_re);
-		if !file_matched {
-			if verbosity > 0 { eprintln!("file: {} did not match expected pattern", filename.display()); }
-			continue;
-		}
+        let (file_matched, file_subgrps) = subs_from_path_buff(&filename, &path_re);
+        if !file_matched {
+            if verbosity > 0 { eprintln!("file: {} did not match expected pattern", filename.display()); }
+            continue;
+        }
 
         match fs::metadata(&filename) {
             Ok(m) => if !m.is_file() { continue; },
@@ -435,40 +437,64 @@ pub fn per_file_thread(
                 Some(i) => String::from(&filename.to_str().unwrap()[i..]),
             }
         };
-        let mut rdr:Box<dyn Read> = match &ext[..] {
-            ".gz" => {
+        let mut rdr: Box<dyn Read> = match &ext[..] {
+            ".gz" | ".tgz" => {
                 match File::open(&filename) {
-                    Ok(f) => Box::new(BufReader::new(GzDecoder::new(f))),
-                    Err(err) => {
-                        eprintln!("skipping file \"{}\", due to error: {}", filename.display(), err);
-                        continue;
+                    Ok(f) => if block_size != 0 {
+                        Box::new(BufReader::with_capacity(io_block_size, GzDecoder::new(f)))
+                    } else {
+                        Box::new(BufReader::new(GzDecoder::new(f)))
                     },
+                    Err(err) => {
+                        eprintln!("skipping gz file \"{}\", due to error: {}", filename.display(), err);
+                        continue;
+                    }
                 }
-            },
-            ".zst" => {
+            }
+            ".zst" | ".zstd" => {
                 match File::open(&filename) {
                     Ok(f) => {
                         match zstd::stream::read::Decoder::new(f) {
-                            Ok(d) =>Box::new(BufReader::new(d)),
+                            Ok(d) => if block_size != 0 {
+                                Box::new(BufReader::with_capacity(io_block_size, d))
+                            } else {
+                                Box::new(BufReader::new(d))
+                            },
                             Err(err) => {
                                 eprintln!("skipping file \"{}\", zstd decoder error: {}", filename.display(), err);
                                 continue;
                             }
                         }
-                    },
+                    }
                     Err(err) => {
-                        eprintln!("skipping file \"{}\", due to error: {}", filename.display(), err);
+                        eprintln!("skipping zst file \"{}\", due to error: {}", filename.display(), err);
                         continue;
-                    },
+                    }
                 }
-            },
-            _ => {
+            }
+            ".bz2" | ".tbz2" | ".txz" | ".xz" | ".lz4" | ".lzma" | ".br" | ".Z" => {
+                if io_block_size != 0 && verbosity > 1 {
+                    eprintln!("file {} cannot override default IO block size as it is opened via a different method", filename.display());
+                }
                 match DecompressionReader::new(&filename) {
                     Ok(rdr) => Box::new(rdr),
                     Err(err) => {
-                        eprintln!("skipping file \"{}\", due to error: {}", filename.display(), err);
+                        eprintln!("skipping general de-comp file \"{}\", due to error: {}", filename.display(), err);
                         continue;
+                    }
+                }
+            }
+            _ => {
+                match File::open(&filename) {
+                    Ok(f) => if block_size != 0 {
+                        Box::new(BufReader::with_capacity(io_block_size, f))
+                    } else {
+                        Box::new(BufReader::new(f))
                     },
+                    Err(err) => {
+                        eprintln!("skipping regular file \"{}\", due to error: {}", filename.display(), err);
+                        continue;
+                    }
                 }
             },
         };
@@ -501,6 +527,7 @@ pub fn get_reader_writer() -> (impl BufRead, impl Write) {
     let (reader, writer) = (BufReader::new(stdin), BufWriter::new(stdout));
     (reader, writer)
 }
+
 #[cfg(target_os = "windows")]
 pub fn get_reader_writer() -> (impl BufRead, impl Write) {
     use std::os::windows::io::{AsRawHandle, FromRawHandle};

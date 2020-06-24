@@ -26,8 +26,8 @@ lazy_static! {
 
 #[derive(StructOpt, Debug, Clone)]
 #[structopt(
-    global_settings(&[structopt::clap::AppSettings::ColoredHelp, structopt::clap::AppSettings::VersionlessSubcommands, structopt::clap::AppSettings::DeriveDisplayOrder]),
-    //raw(setting = "structopt::clap::AppSettings::DeriveDisplayOrder"),
+global_settings(& [structopt::clap::AppSettings::ColoredHelp, structopt::clap::AppSettings::VersionlessSubcommands, structopt::clap::AppSettings::DeriveDisplayOrder]),
+//raw(setting = "structopt::clap::AppSettings::DeriveDisplayOrder"),
 )]
 /// Execute a sql-like group-by on arbitrary text or csv files. Field index base 1.
 /// v: 0.7.2 by Steve Flanagan // github.com/sflanaga/csv-groupby
@@ -204,15 +204,17 @@ pub struct CliCfg {
     /// Used to test IO throughput
     pub noop_proc: bool,
 
-    #[structopt(long = "block_size_k", default_value = "256", conflicts_with = "block_size_b")]
-    /// K size of the IO blocks
+    #[structopt(long = "io_block_size", parse(try_from_str = from_human_size), default_value = "0")]
+    /// IO block size - 0 use default
     ///
-    /// "K" (1024 bytes) used between reading thread and parser threads
-    pub block_size_k: usize,
+    /// Default is typically 8K on linux.  Can be greek notation: 256K = 256*1024 bytes
+    pub io_block_size: usize,
 
-    #[structopt(long = "block_size_B", default_value = "0", conflicts_with = "block_size_K")]
-    /// byte size of the IO blocks
-    pub block_size_b: usize,
+    #[structopt(long = "q_block_size", parse(try_from_str = from_human_size), default_value = "256K")]
+    /// Block size between IO thread and worker
+    ///
+    /// Default is 256 but can be 10B for 10 bytes or 64K for 64*1024 bytes
+    pub q_block_size: usize,
 
     #[structopt(short = "l", name = "file_list", parse(from_os_str), conflicts_with_all = & ["walk", "stdin_file_list", "file"])]
     /// file containing a list of input files
@@ -267,7 +269,7 @@ pub struct CliCfg {
 
 fn print_examples() {
     println!("{}",
-    r#"
+             r#"
     Here are a few examples for quick reference
 
     File sources:
@@ -286,6 +288,33 @@ fn print_examples() {
     "#);
 }
 
+fn from_human_size(s: &str) -> Result<usize> {
+    let mut postfix = String::new();
+    let mut number = String::new();
+    for c in s.chars() {
+        if !c.is_digit(10) {
+            postfix.push(c.to_ascii_lowercase());
+        } else {
+            number.push(c);
+        }
+    }
+    if number.len() == 0 {
+        Err(format!("Missing numeric portion in size, found only: \"{}\"", s))?
+    }
+    if postfix.len() == 0 {
+        let s: usize = number.parse()?;
+        Ok(s)
+    } else {
+        let num: usize = number.parse()?;
+        match postfix.as_str() {
+            "k" | "kb" => Ok(num * 1024usize),
+            "m" | "mb" => Ok(num * 1024usize * 1024usize),
+            "g" | "gb" => Ok(num * 1024usize * 1024usize * 1024usize),
+            _ => Err(format!("human size postfix \"{}\" not understood", postfix.as_str()))?
+        }
+    }
+}
+
 fn escape_parser(s: &str) -> Result<char> {
     if s.starts_with("\\d") {
         match u8::from_str(&s[2..]) {
@@ -301,13 +330,12 @@ fn escape_parser(s: &str) -> Result<char> {
                     Err(format!("Delimiter not understood - must be 1 character OR \\t or \\0 or \\d<dec num>"))?
                 }
                 Ok(s.chars().next().unwrap())
-            },
+            }
         }
     }
 }
 
-fn add_n_check(indices:&mut Vec<usize>, comment: &str) -> Result<()> {
-
+fn add_n_check(indices: &mut Vec<usize>, comment: &str) -> Result<()> {
     let mut last = usize::MAX;
     let mut clone_indices = indices.clone();
     clone_indices.sort();
@@ -319,7 +347,7 @@ fn add_n_check(indices:&mut Vec<usize>, comment: &str) -> Result<()> {
         last = *x;
     }
     for x in indices.iter_mut() {
-        if *x == 0 {Err(format!("Field indices must be 1 or greater - using base 1 indexing, got a {} for option {}", *x, comment))?; }
+        if *x == 0 { Err(format!("Field indices must be 1 or greater - using base 1 indexing, got a {} for option {}", *x, comment))?; }
         *x -= 1;
     }
     Ok(())
@@ -347,7 +375,7 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
         }
         fn re_map(v: usize) -> Result<usize> {
             if v == 0 { return Err("Field indices must start at base 1")?; }
-            Ok(v-1)
+            Ok(v - 1)
         }
 
         add_n_check(&mut cfg.key_fields, "-k")?;
@@ -388,12 +416,16 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
             Err("No work to do! - you should specify at least one or more field options or a testre")?;
         }
         if cfg.re_path.is_some() {
-            if cfg.files.is_empty() && cfg.file_list.is_none() && !cfg.stdin_file_list && cfg.walk.is_none()  {
+            if cfg.files.is_empty() && cfg.file_list.is_none() && !cfg.stdin_file_list && cfg.walk.is_none() {
                 return Err("Cannot use a re_path setting with STDIN as input.")?;
             }
             let _ = Regex::new(&cfg.re_path.as_ref().unwrap())?;
         }
-
+        if cfg.io_block_size != 0 {
+            if cfg.files.is_empty() && cfg.file_list.is_none() && !cfg.stdin_file_list && cfg.walk.is_none() {
+                Err("Cannot set io_block_size in stdin mode")?
+            }
+        }
         cfg
     });
 

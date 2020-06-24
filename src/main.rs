@@ -173,15 +173,11 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
     let do_stdin = cfg.files.is_empty() && cfg.walk.is_none();
     let mut io_status = Arc::new(IoSlicerStatus::new());
-    let block_size = match cfg.block_size_b {
-        0 => cfg.block_size_k * 1024,
-        _ => cfg.block_size_b,
-    };
 
     let (send_blocks, recv_blocks): (crossbeam_channel::Sender<Vec<u8>>, crossbeam_channel::Receiver<Vec<u8>>) = crossbeam_channel::unbounded();
     if !cfg.recycle_io_blocks_disable {
         for _ in 0..cfg.thread_qsize {
-            let ablock = vec![0u8; block_size];
+            let ablock = vec![0u8; cfg.q_block_size];
             send_blocks.send(ablock)?;
         }
     }
@@ -234,7 +230,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     &clone_recv_blocks,
                     &clone_recv_pathbuff,
                     &clone_send_fileslice,
-                    block_size,
+                    clone_cfg.io_block_size,
+                    clone_cfg.q_block_size,
                     clone_cfg.verbose,
                     io_status_cloned,
                     &path_re,
@@ -299,7 +296,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             &recv_blocks,
             &"STDIO".to_string(),
             &empty_vec,
-            block_size,
+            cfg.q_block_size,
             cfg.recycle_io_blocks_disable,
             cfg.verbose,
             &mut handle,
