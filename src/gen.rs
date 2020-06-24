@@ -441,9 +441,9 @@ pub fn per_file_thread(
             ".gz" | ".tgz" => {
                 match File::open(&filename) {
                     Ok(f) => if block_size != 0 {
-                        Box::new(BufReader::with_capacity(io_block_size, GzDecoder::new(f)))
+                        Box::new( GzDecoder::new(BufReader::with_capacity(io_block_size,f)))
                     } else {
-                        Box::new(BufReader::new(GzDecoder::new(f)))
+                        Box::new(GzDecoder::new(f))
                     },
                     Err(err) => {
                         eprintln!("skipping gz file \"{}\", due to error: {}", filename.display(), err);
@@ -454,16 +454,18 @@ pub fn per_file_thread(
             ".zst" | ".zstd" => {
                 match File::open(&filename) {
                     Ok(f) => {
-                        match zstd::stream::read::Decoder::new(f) {
-                            Ok(d) => if block_size != 0 {
-                                Box::new(BufReader::with_capacity(io_block_size, d))
+                        match zstd::stream::read::Decoder::new({
+                            if io_block_size != 0 {
+                                BufReader::with_capacity(io_block_size, f)
                             } else {
-                                Box::new(BufReader::new(d))
-                            },
+                                BufReader::new(f)
+                            }
+                        }) {
+                            Ok(br) => Box::new(br),
                             Err(err) => {
                                 eprintln!("skipping file \"{}\", zstd decoder error: {}", filename.display(), err);
                                 continue;
-                            }
+                            },
                         }
                     }
                     Err(err) => {
