@@ -1,3 +1,4 @@
+
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
@@ -23,8 +24,6 @@ mod gen;
 mod mem;
 mod testre;
 mod keysum;
-mod gettid;
-
 
 use cli::{get_cli, CliCfg};
 use colored::Colorize;
@@ -41,7 +40,7 @@ use smallvec::SmallVec;
 use std::io::BufReader;
 use std::cmp::Ordering::{Less, Greater, Equal};
 use std::hash::{BuildHasher, Hash};
-
+use lazy_static;
 //pub static GLOBAL_TRACKER: System = System; //CounterAtomicUsize = CounterAtomicUsize;
 #[cfg(target_os = "linux")]
 #[global_allocator]

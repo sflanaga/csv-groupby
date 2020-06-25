@@ -56,9 +56,7 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 winapi = { version = "0.3", features = ["processthreadsapi"] }
 
-
 [dependencies]
-#structopt = {version = "0.2.18", feature=["color","termsize","wrap_help"]}
 structopt = {version = "0.3.1", feature=["color","termsize","wrap_help"]}
 cpu-time = "1.0"
 atty = "0.2"

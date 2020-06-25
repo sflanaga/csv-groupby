@@ -12,6 +12,16 @@ use pcre2::bytes::{Captures as Captures_pcre2, Regex as Regex_pre2};
 use std::fs::File;
 use flate2::read::GzDecoder;
 
+#[cfg(target_os = "windows")]
+pub fn gettid() -> usize {
+    unsafe { winapi::um::processthreadsapi::GetCurrentThreadId() as usize }
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub fn gettid() -> usize {
+    unsafe { libc::syscall(libc::SYS_gettid) as usize }
+}
+
 #[allow(dead_code)]
 pub fn distro_format<T, S>(map: &HashMap<T, usize, S>, upper: usize, bottom: usize) -> String
     where
@@ -426,7 +436,6 @@ pub fn per_file_thread(
                 continue;
             }
         };
-        use crate::gettid::gettid;
         if verbosity >= 1 {
             eprintln!("thread id: {} processing file: {}", gettid(), filename.display());
         }
