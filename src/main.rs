@@ -183,7 +183,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // start processing threads
-    for no_threads in 0..cfg.no_threads {
+    for no_threads in 0..cfg.parse_threads {
         let cfg = cfg.clone();
         let clone_recv_fileslice = recv_fileslice.clone();
         let clone_senc_blocks = send_blocks.clone();
@@ -215,7 +215,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             crossbeam_channel::unbounded()
         };
 
-    for no_threads in 0..cfg.no_threads {
+    for no_threads in 0..cfg.io_threads {
         let clone_cfg = cfg.clone();
         let clone_recv_pathbuff = recv_pathbuff.clone();
         let clone_send_fileslice = send_fileslice.clone();
@@ -332,7 +332,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("sending stops to thread");
     }
 
-    for _i in 0..cfg.no_threads {
+    for _i in 0..cfg.io_threads {
         send_pathbuff.send(None)?;
     }
     if cfg.verbose > 1 {
@@ -345,7 +345,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // proc workers on slices can ONLY be told to stop AFTER the IO threads are done
-    for _i in 0..cfg.no_threads {
+    for _i in 0..cfg.parse_threads {
         send_fileslice.send(None)?;
     }
     // merge the data from the workers

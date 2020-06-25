@@ -9,16 +9,21 @@ use std::str::FromStr;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
-fn get_default_thread_no() -> usize {
+fn get_default_parse_thread_no() -> usize {
     if num_cpus::get() > 12 { 12 } else { num_cpus::get() }
 }
 
+fn get_default_io_thread_no() -> usize {
+    if num_cpus::get() > 12 { 2 } else { (num_cpus::get()+1)/2 }
+}
+
 fn get_default_queue_size() -> usize {
-    get_default_thread_no() * 4
+    get_default_parse_thread_no() * 4
 }
 
 lazy_static! {
-    static ref DEFAULT_THREAD_NO: String = get_default_thread_no().to_string();
+    static ref DEFAULT_IO_THREAD_NO: String = get_default_io_thread_no().to_string();
+    static ref DEFAULT_PARSE_THREAD_NO: String = get_default_parse_thread_no().to_string();
     static ref DEFAULT_QUEUE_SIZE: String = get_default_queue_size().to_string();
 }
 
@@ -183,12 +188,19 @@ pub struct CliCfg {
     /// This is different from NULLs where nothing is known - not even an empty string
     pub empty: String,
 
-    #[structopt(short = "t", long = "worker_threads", default_value(& DEFAULT_THREAD_NO))]
+    #[structopt(short = "t", long = "parse_threads", default_value(& DEFAULT_PARSE_THREAD_NO))]
     /// Number of parser threads
     ///
     /// This applies to csv and re parsing modes.  This is also the number of IO threads if
     /// more than one files is being procseed.
-    pub no_threads: u64,
+    pub parse_threads: u64,
+
+    #[structopt(short = "I", long = "io_threads", default_value(& DEFAULT_IO_THREAD_NO))]
+    /// Number of IO threads
+    ///
+    /// The number IO threads needed is generally less than parser threads, but less
+    /// lets you tune the relative load.
+    pub io_threads: u64,
 
     #[structopt(long = "queue_size", default_value(& DEFAULT_QUEUE_SIZE))]
     /// Queue length of blocks between threads
@@ -368,7 +380,7 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
             std::process::exit(1);
         }
         if cfg.re_str.len() > 1 {
-            cfg.no_threads = 1;
+            cfg.parse_threads = 1;
             if cfg.verbose >= 1 {
                 eprintln!("Override thread number to 1 since you have multiple [{}] REs listed ", cfg.re_str.len());
             }
