@@ -15,7 +15,7 @@ fn get_default_parse_thread_no() -> usize {
 }
 
 fn get_default_io_thread_no() -> usize {
-    if num_cpus::get() > 12 { 2 } else { (num_cpus::get()+1)/2 }
+    if num_cpus::get() > 12 { 6 } else { (num_cpus::get()+1)/2 }
 }
 
 fn get_default_queue_size() -> usize {
@@ -36,17 +36,18 @@ global_settings(& [
     ColoredHelp, DeriveDisplayOrder]),
 )]
 /// Execute a sql-like group-by on arbitrary text or csv files. Field indices start at 1.
+///
+/// Note that -l, -f, and -i define where data comes from.  If none of these options
+/// is given then it default to reading stdin.
 pub struct CliCfg {
     #[structopt(short = "R", long = "test_re", name = "testre", conflicts_with_all = & ["keyfield", "uniquefield", "sumfield", "avgfield"])]
-    /// Test a regular expression against strings
+    /// One-off test of a regex
     ///
-    /// Use shell quotes/escape for special stuff
+    /// Used with -L for lines on command line OR type of pipe strings to test using stdin.
     pub testre: Option<String>,
 
     #[structopt(short = "L", long = "test_line", name = "testline", requires = "testre", conflicts_with_all = & ["keyfield", "uniquefield", "sumfield", "avgfield"])]
-    /// Line(s) of text to test
-    ///
-    /// Best surrounded by quotes
+    /// Line(s) of text to test with -R option instead of stdin
     pub testlines: Vec<String>,
 
     #[structopt(short = "k", long = "key_fields", name = "keyfield", use_delimiter(true), conflicts_with = "testre", min_values(1))]
@@ -57,7 +58,7 @@ pub struct CliCfg {
     /// Fields to count distinct
     pub unique_fields: Vec<usize>,
 
-    #[structopt(long = "write_distros", name = "writedistros", use_delimiter(true))]
+    #[structopt(short = "D", long = "write_distros", name = "writedistros", use_delimiter(true))]
     /// write unique value distro with -u option
     ///
     /// Writes values x count to highest and lowest common values
@@ -88,15 +89,15 @@ pub struct CliCfg {
     pub max_num_fields: Vec<usize>,
 
     #[structopt(short = "n", long = "min_nums", name = "min_num_fields", use_delimiter(true), min_values(1))]
-    /// Min fields as float64
+    /// Min fieldss as float64
     pub min_num_fields: Vec<usize>,
 
     #[structopt(short = "X", long = "max_strings", name = "max_str_fields", use_delimiter(true), min_values(1))]
-    /// Max field as string
+    /// Max fields as string
     pub max_str_fields: Vec<usize>,
 
     #[structopt(short = "N", long = "min_strings", name = "min_str_fields", use_delimiter(true), min_values(1))]
-    /// Field to find max as string
+    /// Min fields as string
     pub min_str_fields: Vec<usize>,
 
     #[structopt(short = "r", long = "regex", conflicts_with = "delimiter")]
@@ -106,11 +107,11 @@ pub struct CliCfg {
     /// If more than one -r RE is specified, then it will switch to multiline mode.
     /// This will allow only a single RE parser thread and will slow down progress
     /// significantly, but will create a virtual record across successive lines that match.
-    /// They must match in order and only the first match of each RE will have it's
+    /// They must match in order and only the first match found of each RE will have it's
     /// sub groups captured and added to the record.  Only when the last RE is matched
     /// will results be captured, and at this point it will start looking for the first
     /// RE to match again.  This will NOT work for something like xml unless that xml
-    /// is very regularly formatted across lines.
+    /// is well formatted across multiple lines.
     pub re_str: Vec<String>,
 
     #[structopt(short = "p", long = "path_re")]
@@ -198,8 +199,7 @@ pub struct CliCfg {
     #[structopt(short = "I", long = "io_threads", default_value(& DEFAULT_IO_THREAD_NO))]
     /// Number of IO threads
     ///
-    /// The number IO threads needed is generally less than parser threads, but less
-    /// lets you tune the relative load.
+    /// The number IO threads needed is generally less than parser threads.
     pub io_threads: u64,
 
     #[structopt(long = "queue_size", default_value(& DEFAULT_QUEUE_SIZE))]
@@ -211,9 +211,9 @@ pub struct CliCfg {
     pub path_qsize: usize,
 
     #[structopt(long = "noop_proc")]
-    /// Do no real work
+    /// Do no real work - no parsing - for testing
     ///
-    /// Used to test IO throughput
+    /// Used to test IO throughput, but disabling most parsing
     pub noop_proc: bool,
 
     #[structopt(long = "io_block_size", parse(try_from_str = from_human_size), default_value = "0")]
@@ -229,15 +229,15 @@ pub struct CliCfg {
     pub q_block_size: usize,
 
     #[structopt(short = "l", name = "file_list", parse(from_os_str), conflicts_with_all = & ["walk", "stdin_file_list", "file"])]
-    /// file containing a list of input files
+    /// A file containing a list of input files
     pub file_list: Option<PathBuf>,
 
     #[structopt(short = "i", name = "stdin_file_list", conflicts_with_all = & ["walk", "file_list", "file"])]
-    /// read a list of to parse files from stdin
+    /// Read a list of files to parse from stdin
     pub stdin_file_list: bool,
 
     #[structopt(short = "f", name = "file", parse(from_os_str), conflicts_with_all = & ["walk", "file_list", "stdin_file_list"])]
-    /// list of input files, defaults to stdin
+    /// List of input files
     pub files: Vec<PathBuf>,
 
     #[structopt(short = "w", long = "walk", name = "walk", conflicts_with_all = & ["file", "file_list", "stdin_file_list"])]
@@ -266,7 +266,7 @@ pub struct CliCfg {
     /// disables the key sort
     ///
     /// The key sort used is special in that it attempts to sort the key numerically where
-    /// they appear as numbers and as strings (ignoring case) otherwise like Excel
+    /// they appear as numbers and as strings (ignoring case)  - otherwise it sorts like Excel
     /// would sort things
     pub disable_key_sort: bool,
 
@@ -275,7 +275,7 @@ pub struct CliCfg {
     pub null: String,
 
     #[structopt(short = "E", long = "print_examples")]
-    /// String to use for NULL fields
+    /// Prints example usage scenarious - extra help
     pub print_examples: bool,
 }
 
