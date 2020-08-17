@@ -5,6 +5,7 @@ use pcre2::bytes::Regex;
 
 use lazy_static::lazy_static;
 use structopt::StructOpt;
+use structopt::clap::AppSettings::*;
 use std::str::FromStr;
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
@@ -25,17 +26,16 @@ lazy_static! {
     static ref DEFAULT_IO_THREAD_NO: String = get_default_io_thread_no().to_string();
     static ref DEFAULT_PARSE_THREAD_NO: String = get_default_parse_thread_no().to_string();
     static ref DEFAULT_QUEUE_SIZE: String = get_default_queue_size().to_string();
+    pub static ref BUILD_INFO: String  = format!("ver: {}  rev: {}  date: {}", env!("CARGO_PKG_VERSION"), env!("VERGEN_SHA_SHORT"), env!("VERGEN_BUILD_DATE"));
+
 }
-
-//conflicts_with_all =&["groupby_fields","unique_values","sum_values"]
-
 #[derive(StructOpt, Debug, Clone)]
 #[structopt(
-global_settings(& [structopt::clap::AppSettings::ColoredHelp, structopt::clap::AppSettings::VersionlessSubcommands, structopt::clap::AppSettings::DeriveDisplayOrder]),
-//raw(setting = "structopt::clap::AppSettings::DeriveDisplayOrder"),
+version = BUILD_INFO.as_str(), rename_all = "kebab-case",
+global_settings(& [
+    ColoredHelp, DeriveDisplayOrder]),
 )]
-/// Execute a sql-like group-by on arbitrary text or csv files. Field index base 1.
-/// v: 0.7.2 by Steve Flanagan // github.com/sflanaga/csv-groupby
+/// Execute a sql-like group-by on arbitrary text or csv files. Field indices start at 1.
 pub struct CliCfg {
     #[structopt(short = "R", long = "test_re", name = "testre", conflicts_with_all = & ["keyfield", "uniquefield", "sumfield", "avgfield"])]
     /// Test a regular expression against strings
