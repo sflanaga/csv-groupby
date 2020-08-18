@@ -115,153 +115,64 @@ If you want to test how how a line of text and your regular expression interact 
 
 ## Help  `gb --help`
 ```
-csv-groupby 0.7.2
-Steve Flanagan
-execute a sql-like group-by on arbitrary text or csv files
+csv-groupby ver: 0.8.0  rev: b5aad23  date: 2020-08-17
+Execute a sql-like group-by on arbitrary text or csv files. Field indices start at 1.
+
+Note that -l, -f, and -i define where data comes from.  If none of these options is given then it default to reading
+stdin.
 
 USAGE:
     gb [FLAGS] [OPTIONS]
 
 FLAGS:
-    -c, --csv_output
-            Write delimited output summary instead of auto-aligned table output.  Use -o to change the delimiter.
-
-    -v
-            Verbosity - use more than one v for greater detail
-
-        --skip_header
-            Skip the first (header) line of input for each file or all of stdin
-
-        --no_record_count
-            Do not write counts for each group by key tuple
-
-        --noop_proc
-            do no real work - used for testing IO
-
-    -i
-            read a list of files to parse from stdin
-
-        --stats
-            write final stats after processing
-
-        --no_output
-            do not write summary output - used for benchmarking and tuning - not useful to you
-
-        --recycle_io_blocks_disable
-            disable reusing io blocks - might help performance in some situations?
-
-        --disable_key_sort
-            disables the key sort
-
-            The key sort used is special in that it attempts to sort the key numerically where they appear as numbers
-            and as strings (ignoring case) otherwise like Excel would sort things
-    -h, --help
-            Prints help information
-
-    -V, --version
-            Prints version information
-
+    -c, --csv_output                   Write delimited output
+    -v                                 Verbosity - use more than one v for greater detail
+        --skip_header                  Skip the first (header) line
+        --no_record_count              Do not write records
+        --noop_proc                    Do no real work - no parsing - for testing
+    -i                                 Read a list of files to parse from stdin
+        --stats                        Write stats after processing
+        --no_output                    do not write summary output
+        --recycle_io_blocks_disable    disable reusing memory io blocks
+        --disable_key_sort             disables the key sort
+    -E, --print_examples               Prints example usage scenarious - extra help
+    -h, --help                         Prints help information
+    -V, --version                      Prints version information
 
 OPTIONS:
-    -R, --test_re <testre>
-            Test a regular expression against strings - use shell quotes/escape for special stuff
-
-    -L, --test_line <testline>...
-            Line(s) of text to test - best surrounded by quotes
-
-    -k, --key_fields <keyfield>...
-            Fields that will act as group by keys - base index 1
-
-    -u, --unique_values <uniquefield>...
-            Fields to count distinct - base index 1
-
-        --write_distros <writedistros>...
-            for certain unique_value fields, write a partial distribution of value x count from highest to lowers
-
-        --write_distros_upper <writedistrosupper>
-            number of distros to write with the highest counts [default: 5]
-
-        --write_distros_bottom <writedistrobottom>
-            number of distros to write with the lowest counts [default: 2]
-
-    -s, --sum_values <sumfield>...
-            Field to sum as float64s - base index 1
-
-    -a, --avg_values <avg_fields>...
-            Field to average if parseable number values found - base index 1
-
-    -x, --max_nums <max_num_fields>...
-            Field to find max as float64s - base index 1
-
-    -n, --min_nums <min_num_fields>...
-            Field to find max as float64s - base index 1
-
-    -X, --max_strings <max_str_fields>...
-            Field to find max as string - base index 1
-
-    -N, --min_strings <min_str_fields>...
-            Field to find max as string - base index 1
-
-    -r, --regex <re-str>...
-            Regex mode regular expression
-
-            Several -r <RE> used?  Experimental.  Notes: If more than one -r RE is specified, then it will switch to
-            multiline mode. This will allow only a single RE parser thread and will slow down progress significantly,
-            but will create a virtual record across each line that matches. They must match in order and only the first
-            match of each will have it's sub groups captured and added to the record.  Only when the last RE is matched
-            will results be captured, and at this point it will start looking for the first RE to match again.
-    -p, --path_re <re-path>
-            Parse the path of the file to and process only those that match. If the matches have sub groups, then use
-            those strings as parts to summarized. This works in CSV mode as well as Regex mode, but not while parsing
-            STDIO
-        --re_line_contains <re-line-contains>
-            Gives a hint to regex mode to presearch a line before testing regex. This may speed up regex mode
-            significantly if the lines you match on are a minority to the whole.
-    -d, --input_delimiter <delimiter>
-            Delimiter if in csv mode Note:  \t == <tab>  \0 == <null>  \dVAL where VAL is decimal number for ascii from
-            0 to 127
-
-            Did you know that you can escape tabs and other special characters? bash use -d $'\t' power shell use -d `t
-            note it's the other single quote cmd.exe  use cmd.exe /f:off and type -d "<TAB>" But \t \0 \d11 are there
-            where 11 [default: ,]
-    -q, --quote <quote>
-            csv quote character for fields that might contain the delimiter
-
-    -e, --escape <escape>
-            csv escape character for the quote character
-
-    -C, --comment <comment>
-            csv escape character for the quote character
-
-    -o, --output_delimiter <outputdelimiter>
-            Output delimiter for written summaries [default: ,]
-
-        --empty_string <empty>
-            Empty string substitution - default is "" empty/nothing/notta [default: ]
-
-    -t, --worker_threads <no-threads>
-            Number of csv or re parsing threads - defaults to up to 12 if you have that many CPUs [default: 4]
-
-        --queue_size <thread-qsize>
-            Length of queue between IO block reading and parsing threads [default: 16]
-
-        --block_size_k <block-size-k>
-            Size of the IO block "K" (1024 bytes) used between reading thread and parser threads [default: 256]
-
-        --block_size_B <block-size-b>
-            Block size for IO to queue used for testing really small blocks and possible related that might occurr
-            [default: 0]
-    -l <file_list>
-            file containing a list of input files
-
-    -f <file>...
-            list of input files, defaults to stdin
-
-    -w, --walk <walk>
-            recursively walk a tree of files to parse
-
-        --null_write <nullstring>
-            What to write when we do not have a value at all.  null = I do not know [default: NULL]
+    -R, --test_re <testre>                            One-off test of a regex
+    -L, --test_line <testline>...                     Line(s) of text to test with -R option instead of stdin
+    -k, --key_fields <keyfield>...                    Fields that will act as group by keys
+    -u, --unique_values <uniquefield>...              Fields to count distinct
+    -D, --write_distros <writedistros>...             write unique value distro with -u option
+        --write_distros_upper <writedistrosupper>     number highest value x count [default: 5]
+        --write_distros_bottom <writedistrobottom>    number lowest value x count [default: 2]
+    -s, --sum_values <sumfield>...                    Sum fields as float64s
+    -a, --avg_values <avg_fields>...                  Average fields
+    -x, --max_nums <max_num_fields>...                Max fields as float64s
+    -n, --min_nums <min_num_fields>...                Min fieldss as float64
+    -X, --max_strings <max_str_fields>...             Max fields as string
+    -N, --min_strings <min_str_fields>...             Min fields as string
+    -r, --regex <re-str>...                           Regex mode regular expression to parse fields
+    -p, --path_re <re-path>                           Match path on files and get fields from sub groups
+        --re_line_contains <re-line-contains>         Grep lines that must contain a string
+    -d, --input_delimiter <delimiter>                 Delimiter if in csv mode [default: ,]
+    -q, --quote <quote>                               csv quote character
+    -e, --escape <escape>                             csv escape character
+    -C, --comment <comment>                           csv mode comment character
+    -o, --output_delimiter <outputdelimiter>          Output delimiter for written summaries [default: ,]
+        --empty_string <empty>                        Empty string substitution [default: ]
+    -t, --parse_threads <parse-threads>               Number of parser threads [default: 12]
+    -I, --io_threads <io-threads>                     Number of IO threads [default: 6]
+        --queue_size <thread-qsize>                   Queue length of blocks between threads [default: 48]
+        --path_qsize <path-qsize>                     Queue length of paths to IO slicer threads [default: 0]
+        --io_block_size <io-block-size>               IO block size - 0 use default [default: 0]
+        --q_block_size <q-block-size>                 Block size between IO thread and worker [default: 256K]
+    -l <file_list>                                    A file containing a list of input files
+    -f <file>...                                      List of input files
+    -w, --walk <walk>                                 recursively walk a tree of files to parse
+        --null_write <nullstring>                     String to use for NULL fields [default: NULL]
+```
             
 TODO/ideas:  
 
