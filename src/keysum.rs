@@ -169,7 +169,7 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
     }
     if cfg.max_num_fields.len() > 0 {
         startdestpos += cfg.min_num_fields.len();
-        mergefields(&cfg.min_num_fields, startdestpos, "max", &maxf64);
+        mergefields(&cfg.max_num_fields, startdestpos, "max", &maxf64);
     }
 
     if cfg.avg_fields.len() > 0 {
