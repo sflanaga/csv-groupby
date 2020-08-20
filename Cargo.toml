@@ -1,7 +1,7 @@
 [package]
 edition = '2018'
 name = "csv-groupby"
-version = "0.8.0"
+version = "0.8.1"
 authors = ["Steve Flanagan"]
 
 description="execute a sql-like group-by on arbitrary text or csv files"
