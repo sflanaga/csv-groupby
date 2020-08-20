@@ -562,7 +562,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             {
                 if cfg.key_fields.len() > 0 {
                     for x in &cfg.key_fields {
-                        line_out.push_str(&format!("k:{}{}", alias_m(re_mod_idx(&cfg, *x)), &cfg.od));
+                        line_out.push_str(&format!("k:{}{}", alias_c(re_mod_idx(&cfg, *x)), &cfg.od));
                     }
                     line_out.truncate(line_out.len() - 1);
                 } else {
