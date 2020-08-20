@@ -20,14 +20,14 @@ vergen = "3.1.0"
 panic = 'abort'
 
 [profile.release]
-debug = false 
-debug-assertions = false
+debug = false
+#debug-assertions = false
 # lto does help but not by much with pcre2
-lto = true
-codegen-units=1
-opt-level = 3
-panic = 'abort'  # does cleanup upon panics
-trustflags = ["-C", "target-cpu=native"]
+#lto = true
+#codegen-units=1
+#opt-level = 3
+#panic = 'abort'  # does cleanup upon panics
+#trustflags = ["-C", "target-cpu=native"]
 
 [[bin]]
 name = "gb"
