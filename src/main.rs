@@ -441,6 +441,28 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    let alias = |field: usize, del: char| -> String {
+        match &cfg.field_aliases {
+            None => return field.to_string(),
+            Some(list) => {
+                for (index, s) in list.iter() {
+                    if *index == field {
+                        return format!("{}{}{}", field, del, s.clone());
+                    }
+                }
+            }
+        }
+        return field.to_string();
+    };
+
+    let alias_c = |field: usize| -> String {
+        return alias(field, ':');
+    };
+
+    let alias_m = |field: usize| -> String {
+        return alias(field, '\n');
+    };
+
     if !cfg.no_output {
         if !cfg.csv_output {
             let celltable = std::cell::RefCell::new(Table::new());
@@ -449,7 +471,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 let mut vcell = vec![];
                 if cfg.key_fields.len() > 0 {
                     for x in &cfg.key_fields {
-                        vcell.push(Cell::new(&format!("k:{}", re_mod_idx(&cfg, *x))));
+                        vcell.push(Cell::new(&format!("k:{}", alias_m(re_mod_idx(&cfg, *x)))));
                     }
                 } else {
                     vcell.push(Cell::new("k:-"));
@@ -458,25 +480,25 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     vcell.push(Cell::new("count"));
                 }
                 for x in &cfg.sum_fields {
-                    vcell.push(Cell::new(&format!("s:{}", re_mod_idx(&cfg, *x))));
+                    vcell.push(Cell::new(&format!("sum:{}", alias_m(re_mod_idx(&cfg, *x)))));
                 }
                 for x in &cfg.min_num_fields {
-                    vcell.push(Cell::new(&format!("min:{}", re_mod_idx(&cfg, *x))));
+                    vcell.push(Cell::new(&format!("min:{}", alias_m(re_mod_idx(&cfg, *x)))));
                 }
                 for x in &cfg.max_num_fields {
-                    vcell.push(Cell::new(&format!("max:{}", re_mod_idx(&cfg, *x))));
+                    vcell.push(Cell::new(&format!("max:{}", alias_m(re_mod_idx(&cfg, *x)))));
                 }
                 for x in &cfg.avg_fields {
-                    vcell.push(Cell::new(&format!("a:{}", re_mod_idx(&cfg, *x))));
+                    vcell.push(Cell::new(&format!("avg:{}", alias_m(re_mod_idx(&cfg, *x)))));
                 }
                 for x in &cfg.min_str_fields {
-                    vcell.push(Cell::new(&format!("minstr:{}", re_mod_idx(&cfg, *x))));
+                    vcell.push(Cell::new(&format!("minstr:{}", alias_m(re_mod_idx(&cfg, *x)))));
                 }
                 for x in &cfg.max_str_fields {
-                    vcell.push(Cell::new(&format!("maxstr:{}", re_mod_idx(&cfg, *x))));
+                    vcell.push(Cell::new(&format!("maxstr:{}", alias_m(re_mod_idx(&cfg, *x)))));
                 }
                 for x in &cfg.unique_fields {
-                    vcell.push(Cell::new(&format!("u:{}", re_mod_idx(&cfg, *x))));
+                    vcell.push(Cell::new(&format!("cnt_uniq:{}", alias_m(re_mod_idx(&cfg, *x)))));
                 }
                 let row = Row::new(vcell);
                 celltable.borrow_mut().set_titles(row);
@@ -540,7 +562,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             {
                 if cfg.key_fields.len() > 0 {
                     for x in &cfg.key_fields {
-                        line_out.push_str(&format!("k:{}{}", re_mod_idx(&cfg, *x), &cfg.od));
+                        line_out.push_str(&format!("k:{}{}", alias_m(re_mod_idx(&cfg, *x)), &cfg.od));
                     }
                     line_out.truncate(line_out.len() - 1);
                 } else {
@@ -550,25 +572,25 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     line_out.push_str(&format!("{}count", &cfg.od));
                 }
                 for x in &cfg.sum_fields {
-                    line_out.push_str(&format!("{}s:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}sum:{}", &cfg.od, alias_c(re_mod_idx(&cfg, *x))));
                 }
                 for x in &cfg.min_num_fields {
-                    line_out.push_str(&format!("{}min:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}min:{}", &cfg.od, alias_c(re_mod_idx(&cfg, *x))));
                 }
                 for x in &cfg.max_num_fields {
-                    line_out.push_str(&format!("{}max:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}max:{}", &cfg.od, alias_c(re_mod_idx(&cfg, *x))));
                 }
                 for x in &cfg.avg_fields {
-                    line_out.push_str(&format!("{}a:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}avg:{}", &cfg.od, alias_c(re_mod_idx(&cfg, *x))));
                 }
                 for x in &cfg.min_str_fields {
-                    line_out.push_str(&format!("{}minstr:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}minstr:{}", &cfg.od, alias_c(re_mod_idx(&cfg, *x))));
                 }
                 for x in &cfg.max_str_fields {
-                    line_out.push_str(&format!("{}maxstr:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}maxstr:{}", &cfg.od, alias_c(re_mod_idx(&cfg, *x))));
                 }
                 for x in &cfg.unique_fields {
-                    line_out.push_str(&format!("{}u:{}", &cfg.od, re_mod_idx(&cfg, *x)));
+                    line_out.push_str(&format!("{}cnt_uniq:{}", &cfg.od, alias_c(re_mod_idx(&cfg, *x))));
                 }
                 line_out.push('\n');
                 writer.write_all(&line_out.as_bytes())?;

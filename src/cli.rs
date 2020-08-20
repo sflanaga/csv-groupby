@@ -100,6 +100,13 @@ pub struct CliCfg {
     /// Min fields as string
     pub min_str_fields: Vec<usize>,
 
+    #[structopt(short = "A", long, name = "field_aliases", use_delimiter(true), parse(try_from_str = alias_parser))]
+    /// Alias the field positions to meaningful names
+    ///
+    /// This option is here just to help user keep track of fields, command intent,
+    /// and make output a bit more readable.
+    pub field_aliases: Option<Vec<(usize, String)>>,
+
     #[structopt(short = "r", long = "regex", conflicts_with = "delimiter")]
     /// Regex mode regular expression to parse fields
     ///
@@ -287,7 +294,7 @@ fn print_examples() {
     File sources:
 
     cat it.csv | gb -k 1,2 -s 4  # reads from standard-in
-    find . | gb -i ....          # reads from files from standard in
+    find . | gb -i ....          # reads from files piped to standard in
     gb -f file1 fil2....         # read from specified files
     gb -l <file_list> ....       # reads from files in a list file
     gb -w /some/path -p '.*.csv' # read all files under directory that end in .csv
@@ -325,6 +332,19 @@ fn from_human_size(s: &str) -> Result<usize> {
             _ => Err(format!("human size postfix \"{}\" not understood", postfix.as_str()))?
         }
     }
+}
+fn alias_parser(s: &str) -> Result<(usize, String)> {
+    let v = s.split(':').collect::<Vec<_>>();
+    if v.len() != 2 {
+        Err(format!("alias must come in pairs split by a : you specified: \"{}\"", &s))?;
+    }
+
+    let size = match v[0].parse() {
+        Err(e) => Err(format!("alias must be number:name - this is not a integer \"{}\" found in {}", v[0], &e))?,
+        Ok(s) => s,
+    };
+    let string = String::from(v[1]);
+    Ok((size, string))
 }
 
 fn escape_parser(s: &str) -> Result<char> {

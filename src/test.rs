@@ -41,7 +41,7 @@ mod tests {
         input_str
     }
 
-    static EXPECTED_OUT1: &str = "k:1,count,s:4,min:4,max:4,a:1,minstr:2,maxstr:2,u:2
+    static EXPECTED_OUT1: &str = "k:1,count,sum:4,min:4,max:4,avg:1,minstr:2,maxstr:2,cnt_uniq:2
 0,99,99000,20,1980,0,10,990,99
 1,100,99200,2,1982,1,1,991,100
 2,100,99400,4,1984,2,102,992,100
@@ -54,7 +54,7 @@ mod tests {
 9,100,100800,18,1998,9,109,999,100
 ";
 
-    static EXPECTED_OUT2: &str = "k:1,count,s:4,a:1,u:2
+    static EXPECTED_OUT2: &str = "k:1,count,sum:4,avg:1,cnt_uniq:2
 0,198,198000,0,99
 1,200,198400,1,100
 2,200,198800,2,100
@@ -67,7 +67,7 @@ mod tests {
 9,200,201600,9,100
 ";
 
-    static EXPECTED_OUT_TABLE_DISTROS: &str = "k:1,count,u:3
+    static EXPECTED_OUT_TABLE_DISTROS: &str = "k:1,count,cnt_uniq:3
 0,99,(100 x 1)(1000 x 1)..95..(9800 x 1)(9900 x 1)
 1,100,(10 x 1)(1010 x 1)..96..(9810 x 1)(9910 x 1)
 2,100,(1020 x 1)(1120 x 1)..96..(9820 x 1)(9920 x 1)
