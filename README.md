@@ -6,6 +6,10 @@ gb is a command that takes delimited data (like csv files) or lines of text (lik
 a SQL-select-group-by on that data.  This is a utility partially inspired by [xsv](https://github.com/BurntSushi/xsv) 
 and the desire to stop having to write the same perl one-liners to analyze massive log files.
 
+It does this job very fast by "slicing" blocks of data on line boundary points and forwarding those line-even blocks to multiple parser threads.
+There are also multiple IO threads when list of files are provided as a data source.
+
+- Fast - processing at 500MB/s to 2GB/s is not uncommon on fast multicore machines
 - Do group-bys with sums, counts, count distincts, avg, min, and max
 - Can process [CSV](https://crates.io/crates/csv) files OR text using [regular](https://www.pcre.org/current/doc/html/pcre2syntax.html) [expressions](https://crates.io/crates/pcre2)
 - Process files or stdin as a data source:
@@ -15,10 +19,7 @@ and the desire to stop having to write the same perl one-liners to analyze massi
   - recursive [--walk](https://github.com/BurntSushi/ripgrep/tree/master/ignore) directory trees and filter for only the files you want
 - Filenames (-p) can be filtered/parsed with regular expressions where sub-groups become fields.
 - Delimited output or "aligned" table output
-- Fast - processing at 500MB/s to 2GB/s is not uncommon on fast multicore machines
 
-It does this job very fast by "slicing" blocks of data on line boundary points and forwarding those line-even blocks to multiple parser threads.
-There are also multiple IO threads when list of files are provided as a data source.
 
 
 ## HOW-TO:
