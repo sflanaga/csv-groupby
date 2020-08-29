@@ -115,7 +115,7 @@ If you want to test how how a line of text and your regular expression interact 
 
 ## Help  `gb --help`
 ```
-csv-groupby ver: 0.8.0  rev: b5aad23  date: 2020-08-17
+csv-groupby ver: 0.8.2  rev: 194704d  date: 2020-08-29
 Execute a sql-like group-by on arbitrary text or csv files. Field indices start at 1.
 
 Note that -l, -f, and -i define where data comes from.  If none of these options is given then it default to reading
@@ -153,6 +153,7 @@ OPTIONS:
     -n, --min_nums <min_num_fields>...                Min fieldss as float64
     -X, --max_strings <max_str_fields>...             Max fields as string
     -N, --min_strings <min_str_fields>...             Min fields as string
+    -A, --field-aliases <field_aliases>...            Alias the field positions to meaningful names
     -r, --regex <re-str>...                           Regex mode regular expression to parse fields
     -p, --path_re <re-path>                           Match path on files and get fields from sub groups
         --re_line_contains <re-line-contains>         Grep lines that must contain a string
@@ -177,17 +178,18 @@ OPTIONS:
 TODO/ideas:  
 
 - Fix -i to also support -p option
-
+    > fixed
 - More better readme - sometimes more is not better
 - More diverse unit testing
 - Oh musl, where for art thou musl?  Why your alloc so bad....
-- csv comment char
 - more aggregates: min, max, empty_count, number_count, zero_count
   - avg and sum done
+  - max and min done for string and numbers
 - faster sort on mixed key fields before output
 - faster output for csv output mode
+   > faster, but not as fast as possible
 - do more work to multi-line re mode - not sure how it should really work yet
-> This does function and I have used it on well formed xml, but not sure it will be a thing or not.
+    > This does function and I have used it on well formed xml, but not sure it will be a thing or not.
 - flat mode - no summary but just write X fields to the output as found - a kind s/()..()..()/$1,$2,$3,.../;
 - use RE find/search for matches instead of line bound interface?
 
