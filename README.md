@@ -2,25 +2,31 @@
 ## `gb`   A Command that does a SQL like "group by" on delimited files OR arbitrary lines of text
 
 
-gb is a command that takes delimited data (like csv files) or lines of text (like a log file) and emulates a SQL select-group-by on that data.  This is a utility partially inspired by [xsv](https://github.com/BurntSushi/xsv) and the desire to stop having to write the same perl one-liners to analyze massive log files.
+gb is a command that takes delimited data (like csv files) or lines of text (like a log file) and emulates 
+a SQL-select-group-by on that data.  This is a utility partially inspired by [xsv](https://github.com/BurntSushi/xsv) 
+and the desire to stop having to write the same perl one-liners to analyze massive log files.
 
-- Do group-bys with sums, counts, and count distincts
+- Do group-bys with sums, counts, count distincts, avg, min, and max
 - Can process [CSV](https://crates.io/crates/csv) files OR text using [regular](https://www.pcre.org/current/doc/html/pcre2syntax.html) [expressions](https://crates.io/crates/pcre2)
 - Process files or stdin as a data source:
   - csv files
-  - text/log where parsed fields come from regular expression sub groups
-  - fi  les can be decompressed (like .zst, .gz, .xz, etc) data files on the fly
+  - text/log handled via regex mode where sub groups map to field positions
+  - files are decompressed (like .zst, .gz, .xz, etc) on the fly
   - recursive [--walk](https://github.com/BurntSushi/ripgrep/tree/master/ignore) directory trees and filter for only the files you want
-- Filenames (-p) parsed with regular expressions used in filtering can also have these sub groups used as fields.
-- Delimited output or prettytable format output
-- Fast - processing at 500MB/s is not uncommon on multicore machines
+- Filenames (-p) can be filtered/parsed with regular expressions where sub-groups become fields.
+- Delimited output or "aligned" table output
+- Fast - processing at 500MB/s to 2GB/s is not uncommon on fast multicore machines
 
-It does this very fast by "slicing" blocks of data on line boundary points and forwarding those line-even blocks to multiple parser threads.
+It does this job very fast by "slicing" blocks of data on line boundary points and forwarding those line-even blocks to multiple parser threads.
+There are also multiple IO threads when list of files are provided as a data source.
 
 
 ## HOW-TO:
 
-You identify fields as column numbers.  These will either be part of the "key" or group-by, an aggregate (avg or sum), or count distinct.  You may use none to many fields for each kind of field.
+You identify fields as column numbers.  
+These will either be part of the "key" or group-by, an aggregate (avg or sum), or count distinct.  
+You may use none-to-many fields for each kind of field including the key field.
+Use -A option to give these numbered fields "names" used in the output.
 
 
 ### Summaries on a csv file:
@@ -113,7 +119,7 @@ Here the subgroups of 1 and 2 are used to create a composite key of the date fro
 If you want to test how how a line of text and your regular expression interact use the options -R "some regular expression" and the -L "line of text" to get the sub groups gb will find.
 
 
-## Help  `gb --help`
+## Help  `gb -h`
 ```
 csv-groupby ver: 0.8.2  rev: 194704d  date: 2020-08-29
 Execute a sql-like group-by on arbitrary text or csv files. Field indices start at 1.
