@@ -281,6 +281,13 @@ pub struct CliCfg {
     /// String to use for NULL fields
     pub null: String,
 
+    #[structopt(long = "ISO-8859", name = "ISO_8859")]
+    /// Normally UTF8 is used for character decoding, but overrides that to Latin-1 or ISO-8859 character decoding.
+    ///
+    /// This can often get past issues with what appears to be binary mixed with otherwise ASCII data.
+    /// This options internally converts the text of bytes to UTF8 and then processes as "normal".
+    pub ISO_8859: bool,
+
     #[structopt(short = "E", long = "print_examples")]
     /// Prints example usage scenarious - extra help
     pub print_examples: bool,

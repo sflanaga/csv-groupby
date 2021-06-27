@@ -61,6 +61,8 @@ use std::collections::{HashMap, BTreeMap};
 use std::fs::File;
 use std::ffi::OsString;
 use crate::keysum::{sum_maps, store_rec};
+use std::error::Error;
+use predicates::str::PredicateStrExt;
 
 //use seahash::SeaHasher;
 //use fnv::FnvHashMap;
@@ -727,6 +729,9 @@ fn _worker_re(
     let mut _skipped = 0;
     let mut cl = re.capture_locations();
 
+    let mut latin_str_buff = String::with_capacity(1024);
+    let mut err_line_fix = String::with_capacity(256);
+
     loop {
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
@@ -740,10 +745,24 @@ fn _worker_re(
         use std::io::BufRead;
 
         if !cfg.noop_proc {
-            let slice = &fc.block[0..fc.len];
+            let slice = if cfg.ISO_8859 {
+                latin_str_buff.clear();
+                fc.block[0..fc.len].iter().map(|&c| c as char).for_each(|c| latin_str_buff.push(c));
+                latin_str_buff.as_bytes()
+            } else {
+                &fc.block[0..fc.len]
+            };
 
-            for line in slice.lines() {
-                let line = line?;
+            'LINE_LOOP: for (inner_count, line) in slice.split(|c| *c==b'\n').enumerate() {
+                let line = match std::str::from_utf8(&line) {
+                    Err(e) => {
+                        ascii_line_fixup_full(line, &mut err_line_fix);
+                        eprintln!("skipping line due with UTF8 decoding error (try ISO-8859 option?): {}\n\tline: {}", e, &err_line_fix);
+                        continue 'LINE_LOOP;
+                    },
+                    Ok(line) => line
+                };
+
                 if let Some(ref line_contains) = cfg.re_line_contains {
                     if !line.contains(line_contains) {
                         if cfg.verbose > 3 {
@@ -821,6 +840,10 @@ fn _worker_csv(
     let mut fieldcount = 0;
     let mut fieldskipped = 0;
     let mut rowcount = 0;
+
+    let mut latin_str_buff = String::with_capacity(246);
+    let mut err_line_fix = String::with_capacity(256);
+
     loop {
         let fc = match recv.recv().unwrap() {
             Some(fc) => fc,
@@ -834,28 +857,69 @@ fn _worker_csv(
         let add_subs = fc.sub_grps.len() > 0;
 
         if !cfg.noop_proc {
-            let mut recrdr = builder.from_reader(&fc.block[0..fc.len]);
+            let lbuff = if cfg.ISO_8859 {
+                latin_str_buff.clear();
+                fc.block[0..fc.len].iter().map(|&c| c as char).for_each(|c| latin_str_buff.push(c));
+                latin_str_buff.as_bytes()
+            } else {
+                &fc.block[0..fc.len]
+            };
+
+            let mut recrdr = builder.from_reader(lbuff);
             if add_subs {
                 for record in recrdr.records() {
-                    let record = record?;
-                    let mut v = SmallVec::<[&str; 16]>::new();
-//                    let mut v: Vec<&str> = Vec::with_capacity(record.len() + fc.sub_grps.len());
-                    fc.sub_grps.iter().map(|x| x.as_str()).chain(record.iter())
-                        .for_each(|x| v.push(x)); //
-                    if cfg.verbose > 2 { eprintln!("DBG WITH FILE PASTS VEC: {:?}", v); }
-                    let (fc, fs) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
-                    fieldcount += fc;
-                    fieldskipped += fs;
+                    match record {
+                        Ok(record) => {
+                            let mut v = SmallVec::<[&str; 16]>::new();
+                            fc.sub_grps.iter().map(|x| x.as_str()).chain(record.iter())
+                                .for_each(|x| v.push(x)); //
+                            if cfg.verbose > 2 { eprintln!("DBG WITH FILE PASTS VEC: {:?}", v); }
+                            let (fc, fs) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
+                            fieldcount += fc;
+                            fieldskipped += fs;
 
-                    v.clear();
+                            v.clear();
+                        },
+                        Err(e) => {
+                            match e.kind() {
+                                csv::ErrorKind::Utf8 {ref err, pos} => {
+                                    if let Some(pos) = pos {
+                                        ascii_line_fixup(&fc.block, pos.byte() as usize, &mut err_line_fix);
+                                        eprintln!("skipping line due to bad UTF8 codes in file (try ISO-8859 option)\n\tline:{}",&err_line_fix);
+                                    }
+
+                                },
+                                _ => eprintln!("skipping line due to err: {:?}", e),
+
+                            }
+                        },
+                    }
                 }
             } else {
+                let mut cnt_rec = 0usize;
                 for record in recrdr.records() {
-                    let record = record?;
-                    let (fc, fs) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
-                    fieldcount += fc;
-                    fieldskipped += fs;
+                    match record {
+                        Ok(record) => {
+                            let (fc, fs) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+                            fieldcount += fc;
+                            fieldskipped += fs;
+                            cnt_rec += 1;
+                        },
+                        Err(e) => {
+                            match e.kind() {
+                                csv::ErrorKind::Utf8 {ref err, pos} => {
+                                    if let Some(pos) = pos {
+                                        ascii_line_fixup(&fc.block, pos.byte() as usize, &mut err_line_fix);
+                                        eprintln!("skipping line due to bad UTF8 codes in file (try ISO-8859 option)\n\tline:{}",&err_line_fix);
+                                    }
 
+                                },
+                                _ => eprintln!("skipping line due to err: {:?}", e),
+
+                            }
+
+                        },
+                    }
                 }
             }
         }
@@ -927,6 +991,8 @@ fn _worker_multi_re(
     acc_record.push(String::new()); // push 1st blank whole match
     let mut cl = re_es[0].capture_locations();
 
+    let mut latin_str_buff = String::with_capacity(1024);
+
     let mut acc_idx = 1usize;
     loop {
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
@@ -938,6 +1004,17 @@ fn _worker_multi_re(
                 break;
             }
         };
+
+        let convert = false;
+
+        let lbuff = if convert {
+            latin_str_buff.clear();
+            fc.block[0..fc.len].iter().map(|&c| c as char).for_each(|c| latin_str_buff.push(c));
+            latin_str_buff.as_bytes()
+        } else {
+            &fc.block[0..fc.len]
+        };
+
         if fc.index == 0 {
             re_curr_idx = 0;
             for s in &mut acc_record {
@@ -950,8 +1027,13 @@ fn _worker_multi_re(
         }
 
         if !cfg.noop_proc {
-            for line in fc.block[0..fc.len].lines() {
+            'LINE_LOOP: for line in lbuff.lines() {
+                if let Err(e) = line {
+                    eprintln!("bad line");
+                    continue 'LINE_LOOP;
+                }
                 let line = line?;
+
                 linecount += 1;
                 let re = &re_es[re_curr_idx];
                 if let Some(_record) = re.captures_read(&mut cl, line.as_bytes())? {
@@ -997,3 +1079,31 @@ fn _worker_multi_re(
     Ok((map, rowcount, fieldcount, fieldskipped))
 }
 
+fn ascii_line_fixup(slice: &[u8], start: usize, str: &mut String) {
+    let mut pos = start;
+    str.clear();
+    loop {
+        let mut b = slice[pos];
+        if b == 10 || b == 11 {
+            break;
+        } else if b > 127 {
+            str.push_str(format!("[0x{:x}]", b).as_str());
+        } else {
+            str.push(b as char);
+        }
+        pos += 1;
+    }
+}
+
+fn ascii_line_fixup_full(slice: &[u8], str: &mut String) {
+    str.clear();
+    for b in slice {
+        if *b == 10 || *b == 11 {
+            break;
+        } else if *b > 127 {
+            str.push_str(format!("[0x{:x}]", b).as_str());
+        } else {
+            str.push(*b as char);
+        }
+    }
+}
