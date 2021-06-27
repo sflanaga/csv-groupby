@@ -22,13 +22,18 @@ fn get_default_queue_size() -> usize {
     get_default_parse_thread_no() * 4
 }
 
+// fn get_ver() -> String {
+//     return format!("rev: {}", env!("RIPGREP_BUILD_GIT_HASH");
+// }
+
 lazy_static! {
     static ref DEFAULT_IO_THREAD_NO: String = get_default_io_thread_no().to_string();
     static ref DEFAULT_PARSE_THREAD_NO: String = get_default_parse_thread_no().to_string();
     static ref DEFAULT_QUEUE_SIZE: String = get_default_queue_size().to_string();
-    pub static ref BUILD_INFO: String  = format!("ver: {}  rev: {}  date: {}", env!("CARGO_PKG_VERSION"), env!("VERGEN_SHA_SHORT"), env!("VERGEN_BUILD_DATE"));
-
+    pub static ref BUILD_INFO: String  = format!("  ver: {}  rev: {}",
+        env!("CARGO_PKG_VERSION"), env!("BUILD_GIT_HASH"));
 }
+
 #[derive(StructOpt, Debug, Clone)]
 #[structopt(
 version = BUILD_INFO.as_str(), rename_all = "kebab-case",
@@ -294,7 +299,7 @@ pub struct CliCfg {
 }
 
 fn print_examples() {
-    println!("{}",
+    println!("{}\nver: {}\n",
              r#"
     Here are a few examples for quick reference
 
@@ -311,7 +316,8 @@ fn print_examples() {
     # reads csv file1 and does a select.. group by 2
     # sum field 3;  avg field 4; write value count distro for field 5
 
-    "#);
+    "#, env!("BUILD_GIT_HASH"));
+
 }
 
 fn from_human_size(s: &str) -> Result<usize> {
@@ -470,3 +476,4 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
 
     Ok(cfg)
 }
+
