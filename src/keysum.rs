@@ -3,6 +3,14 @@ use std::time::Instant;
 use crate::cli::CliCfg;
 use crate::{KEY_DEL, MyMap};
 use std::cmp::{min, max};
+use prettytable::Table;
+use itertools::Itertools;
+
+#[derive(Debug)]
+pub struct SchemaSample {
+    pub matrix: Vec<Vec<String>>,
+    pub num: u32,
+}
 
 
 #[derive(Debug)]
@@ -68,6 +76,114 @@ pub fn parse_and_merge_f64<T, F>(_line: &str, record: &T, rec_len: usize, keysum
         });
 
      */
+}
+
+
+impl SchemaSample {
+    pub fn new(num: u32) -> Self {
+        SchemaSample {
+            matrix: vec![],
+            num,
+        }
+    }
+    pub fn schema_rec<T>(self: &mut Self, record: &T, rec_len: usize)
+        where
+            <T as std::ops::Index<usize>>::Output: AsRef<str>,
+            T: std::ops::Index<usize> + std::fmt::Debug,
+    {
+        if self.matrix.len() == 0 {
+            for i in 1..rec_len+1 {
+                let mut row = vec![];
+                row.push(i.to_string());
+                self.matrix.push(row);
+            }
+        }
+
+        for i in 0 ..rec_len {
+            let mut v = self.matrix.get_mut(i);
+            if ( v.is_none()) {
+                // just in case the "header" or other previous line is not as long as this one...
+                self.matrix.push(vec![]);
+                self.matrix.get_mut(i).unwrap().push(i.to_string());
+            }
+            self.matrix
+                .get_mut(i)
+                .expect("should not get here - just added i'th item to matrix")
+                .push(String::from(record.index(i).as_ref()));
+        }
+    }
+
+    pub fn print_schema(self: &mut Self, cfg: &CliCfg) {
+        if self.matrix.len() <= 0 {
+            return;
+        } else {
+            let mut padding = vec![];
+
+            let mut header = vec![];
+            header.push("index".to_string());
+            let num_cols = self.matrix.get(0).unwrap().len();
+            for c in 1..num_cols {
+                header.push(format!("line{}", c));
+            }
+            self.matrix.insert(0,header);
+
+            for r in 0..self.matrix.len() {
+                for c in 0..num_cols {
+                    let this_len = self.matrix.get(r).unwrap().get(c).unwrap_or(&cfg.null).len();
+                    match padding.get_mut(c) {
+                        Some(curr) => *curr = max(*curr,this_len),
+                        None => padding.push(this_len),
+                    }
+                }
+            }
+
+            let null_str = String::from("NULL");
+
+            for r in 0..self.matrix.len() {
+                let num_cols = self.matrix.get(0).unwrap().len();
+                for c in 0..num_cols {
+                    print!("{:>padding$}", self.matrix.get(r).unwrap().get(c).unwrap_or(&cfg.null), padding=padding.get(c).unwrap());
+                    if c < num_cols-1 {
+                        print!("{} ", cfg.od);
+                    } else {
+                        println!();
+                    }
+                }
+            }
+        }
+        std::process::exit(0);
+    }
+
+    pub fn done(self: &Self) -> bool {
+        if  self.matrix.len() <= 0 {
+            return false;
+        } else {
+            return self.matrix.get(0).unwrap().len() > self.num as usize
+        }
+    }
+
+}
+
+pub fn schema_rec<T>(matrix: &mut Vec<Vec<String>>, ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> (usize,usize)
+    where
+        <T as std::ops::Index<usize>>::Output: AsRef<str>,
+        T: std::ops::Index<usize> + std::fmt::Debug,
+{
+    if matrix.len() == 0 {
+        for i in 0..rec_len {
+            let mut row = vec![];
+            row.push(i.to_string());
+            matrix.push(row);
+        }
+    }
+
+    for v in matrix {
+        for i in 0 ..rec_len {
+            v.push(String::from(record.index(i).as_ref()));
+        }
+    }
+
+    (0,0)
 }
 
 pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> (usize,usize)
@@ -273,8 +389,6 @@ pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
     let start = Instant::now();
     let lens = join(maps.iter().map(|x:&MyMap| x.len().to_string()), ",");
 
-// println!("map count: {}", maps.len());
-// remove first map from list but keep / reuse it as a merge target
     let mut p_map = maps.remove(0);
     use itertools::join;
     for i in 0..maps.len() {

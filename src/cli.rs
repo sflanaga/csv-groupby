@@ -293,6 +293,13 @@ pub struct CliCfg {
     /// This options internally converts the text of bytes to UTF8 and then processes as "normal".
     pub ISO_8859: bool,
 
+    #[structopt(long = "sample_schema", name = "sample_schema")]
+    /// Display indexes of fields for either RE groups or csv fields
+    ///
+    /// This is useful for seeing how indexes map to fields from a RE
+    /// subgroups or from csv positions.
+    pub sample_schema: Option<u32>,
+
     #[structopt(short = "E", long = "print_examples")]
     /// Prints example usage scenarious - extra help
     pub print_examples: bool,
@@ -470,6 +477,9 @@ pub fn get_cli() -> Result<Arc<CliCfg>> {
             if cfg.files.is_empty() && cfg.file_list.is_none() && !cfg.stdin_file_list && cfg.walk.is_none() {
                 Err("Cannot set io_block_size in stdin mode")?
             }
+        }
+        if cfg.sample_schema.is_some() {
+            cfg.parse_threads = 1;
         }
         cfg
     });

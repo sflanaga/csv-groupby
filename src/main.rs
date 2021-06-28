@@ -6,7 +6,7 @@ use atty::Stream;
 use pcre2::bytes::{CaptureLocations as CaptureLocations_pcre2, Captures as Captures_pcre2, Regex as Regex_pre2};
 use prettytable::{Cell, format, Row, Table};
 use regex::{CaptureLocations, Regex};
-use std::alloc::System;
+use std::alloc::{System, handle_alloc_error};
 use std::{
     cmp::Ordering,
     io::prelude::*,
@@ -60,7 +60,7 @@ const KEY_DEL: char = '\0';
 use std::collections::{HashMap, BTreeMap};
 use std::fs::File;
 use std::ffi::OsString;
-use crate::keysum::{sum_maps, store_rec};
+use crate::keysum::{sum_maps, store_rec, SchemaSample};
 use std::error::Error;
 use predicates::str::PredicateStrExt;
 
@@ -467,8 +467,8 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
     if !cfg.no_output {
         if !cfg.csv_output {
-            let celltable = std::cell::RefCell::new(Table::new());
-            celltable.borrow_mut().set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
+            let mut celltable = Table::new();
+            celltable.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
             {
                 let mut vcell = vec![];
                 if cfg.key_fields.len() > 0 {
@@ -503,7 +503,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     vcell.push(Cell::new(&format!("cnt_uniq:{}", alias_m(re_mod_idx(&cfg, *x)))));
                 }
                 let row = Row::new(vcell);
-                celltable.borrow_mut().set_titles(row);
+                celltable.set_titles(row);
             }
 
             for ff in thekeys.iter() {
@@ -548,13 +548,13 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 let row = Row::new(vcell);
-                celltable.borrow_mut().add_row(row);
+                celltable.add_row(row);
             }
             let stdout = std::io::stdout();
             let _writerlock = stdout.lock();
             let (_reader, mut writer) = get_reader_writer();
 
-            celltable.borrow_mut().print(&mut writer)?;
+            celltable.print(&mut writer)?;
         } else {
             let stdout = std::io::stdout();
             let _writerlock = stdout.lock();
@@ -732,7 +732,13 @@ fn _worker_re(
     let mut latin_str_buff = String::with_capacity(1024);
     let mut err_line_fix = String::with_capacity(256);
 
-    loop {
+    let mut sch = if cfg.sample_schema.is_some() {
+        Some(SchemaSample::new(cfg.sample_schema.unwrap()))
+    } else {
+        None
+    };
+
+    'BLOCK_LOOP: loop {
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
             None => {
@@ -785,10 +791,20 @@ fn _worker_re(
                         }
                     }
                     if cfg.verbose > 2 { eprintln!("DBG RE WITH FILE PASTS VEC: {:?}", v); }
-                    let (fc,fs) = store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
-                    fieldcount += fc;
-                    fieldskipped += fs;
-                    //v.clear();
+                    match sch {
+                        Some(ref mut sch) => {
+                            sch.schema_rec(&v, v.len());
+                            if sch.done() {
+                                break 'BLOCK_LOOP
+                            }
+                        },
+                        _ => {
+                            let (fc, fs) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
+                            fieldcount += fc;
+                            fieldskipped += fs;
+                            // cnt_rec += 1;
+                        }
+                    }
                 } else {
                     _skipped += 1;
                 }
@@ -798,6 +814,7 @@ fn _worker_re(
             send_blocks.send(fc.block)?;
         }
     }
+    if let Some(mut sch) = sch { sch.print_schema(&cfg);}
     Ok((map, rowcount, fieldcount, fieldskipped))
 }
 
@@ -820,21 +837,7 @@ fn _worker_csv(
 
     let mut map = create_map();
 
-    let mut builder = csv::ReaderBuilder::new();
-    //let delimiter = dbg!(cfg.delimiter.expect("delimiter is malformed"));
-    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.skip_header).flexible(true);
-
-    if cfg.quote.is_some() {
-        builder.quote(cfg.quote.unwrap() as u8);
-    }
-
-    if cfg.escape.is_some() {
-        builder.escape(Some(cfg.escape.unwrap() as u8));
-    }
-
-    if cfg.comment.is_some() {
-        builder.comment(Some(cfg.comment.unwrap() as u8));
-    }
+    let mut csv_builder = create_csv_builder(&cfg);
 
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
@@ -844,7 +847,13 @@ fn _worker_csv(
     let mut latin_str_buff = String::with_capacity(246);
     let mut err_line_fix = String::with_capacity(256);
 
-    loop {
+    let mut sch = if cfg.sample_schema.is_some() {
+        Some(SchemaSample::new(cfg.sample_schema.unwrap()))
+    } else {
+        None
+    };
+
+    'BLOCK_LOOP: loop {
         let fc = match recv.recv().unwrap() {
             Some(fc) => fc,
             None => {
@@ -865,7 +874,7 @@ fn _worker_csv(
                 &fc.block[0..fc.len]
             };
 
-            let mut recrdr = builder.from_reader(lbuff);
+            let mut recrdr = csv_builder.from_reader(lbuff);
             if add_subs {
                 for record in recrdr.records() {
                     match record {
@@ -874,10 +883,19 @@ fn _worker_csv(
                             fc.sub_grps.iter().map(|x| x.as_str()).chain(record.iter())
                                 .for_each(|x| v.push(x)); //
                             if cfg.verbose > 2 { eprintln!("DBG WITH FILE PASTS VEC: {:?}", v); }
-                            let (fc, fs) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
-                            fieldcount += fc;
-                            fieldskipped += fs;
-
+                            match sch {
+                                Some(ref mut sch) => {
+                                    sch.schema_rec(&v, v.len());
+                                    if sch.done() {
+                                        break 'BLOCK_LOOP
+                                    }
+                                },
+                                _ => {
+                                    let (fc, fs) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+                                    fieldcount += fc;
+                                    fieldskipped += fs;
+                                }
+                            };
                             v.clear();
                         },
                         Err(e) => {
@@ -900,10 +918,20 @@ fn _worker_csv(
                 for record in recrdr.records() {
                     match record {
                         Ok(record) => {
-                            let (fc, fs) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
-                            fieldcount += fc;
-                            fieldskipped += fs;
-                            cnt_rec += 1;
+                            match sch {
+                                Some(ref mut sch) => {
+                                    sch.schema_rec(&record, record.len());
+                                    if sch.done() {
+                                        break 'BLOCK_LOOP
+                                    }
+                                },
+                                _ => {
+                                    let (fc, fs) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+                                    fieldcount += fc;
+                                    fieldskipped += fs;
+                                    cnt_rec += 1;
+                                }
+                            };
                         },
                         Err(e) => {
                             match e.kind() {
@@ -927,6 +955,8 @@ fn _worker_csv(
             send_blocks.send(fc.block)?;
         }
     }
+    if let Some(mut sch) = sch { sch.print_schema(&cfg);}
+
     Ok((map, rowcount, fieldcount, fieldskipped))
 }
 
@@ -988,13 +1018,19 @@ fn _worker_multi_re(
     let mut re_curr_idx = 0;
     let mut acc_record: Vec<String> = vec![];
 
+    let mut sch = if cfg.sample_schema.is_some() {
+        Some(SchemaSample::new(cfg.sample_schema.unwrap()))
+    } else {
+        None
+    };
+
     acc_record.push(String::new()); // push 1st blank whole match
     let mut cl = re_es[0].capture_locations();
 
     let mut latin_str_buff = String::with_capacity(1024);
 
     let mut acc_idx = 1usize;
-    loop {
+    'BLOCK_LOOP: loop {
         let fc = match recv.recv().expect("thread failed to get next job from channel") {
             Some(fc) => fc,
             None => {
@@ -1049,13 +1085,23 @@ fn _worker_multi_re(
                     re_curr_idx += 1;
                     if re_curr_idx >= re_es.len() {
                         let mut v: Vec<&str> = Vec::with_capacity(acc_record.len() + fc.sub_grps.len());
-                        fc.sub_grps.iter().map(|x| x.as_str()).chain(acc_record.iter().map(|x| x.as_str()))
-                            .for_each(|x| v.push(x)); //
-
-
-                        let (fc, fs) = store_rec(&mut buff, &line, &v, v.len(), &mut map, &cfg, &mut rowcount);
-                        fieldcount += fc;
-                        fieldskipped += fs;
+                        fc.sub_grps.iter()
+                            .map(|x| x.as_str())
+                            .chain(acc_record.iter().map(|x| x.as_str()))
+                            .for_each(|x| v.push(x));
+                        match sch {
+                            Some(ref mut sch) => {
+                                sch.schema_rec(&v, v.len());
+                                if sch.done() {
+                                    break 'BLOCK_LOOP
+                                }
+                            },
+                            _ => {
+                                let (fc, fs) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
+                                fieldcount += fc;
+                                fieldskipped += fs;
+                            }
+                        }
                         if cfg.verbose > 2 {
                             eprintln!("mRE STORE {:?} on line: {}", acc_record, line);
                         }
@@ -1076,6 +1122,7 @@ fn _worker_multi_re(
             send_blocks.send(fc.block)?;
         }
     }
+    if let Some(mut sch) = sch { sch.print_schema(&cfg);}
     Ok((map, rowcount, fieldcount, fieldskipped))
 }
 
@@ -1106,4 +1153,22 @@ fn ascii_line_fixup_full(slice: &[u8], str: &mut String) {
             str.push(*b as char);
         }
     }
+}
+
+fn create_csv_builder(cfg: &CliCfg) -> csv::ReaderBuilder {
+    let mut builder = csv::ReaderBuilder::new();
+    builder.delimiter(cfg.delimiter as u8).has_headers(cfg.skip_header).flexible(true);
+
+    if cfg.quote.is_some() {
+        builder.quote(cfg.quote.unwrap() as u8);
+    }
+
+    if cfg.escape.is_some() {
+        builder.escape(Some(cfg.escape.unwrap() as u8));
+    }
+
+    if cfg.comment.is_some() {
+        builder.comment(Some(cfg.comment.unwrap() as u8));
+    }
+    builder
 }
