@@ -156,6 +156,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_rowcount = 0usize;
     let mut total_fieldcount = 0usize;
     let mut total_fieldskipped = 0usize;
+    let mut total_lines_skipped = 0usize;
     let mut total_blocks = 0usize;
     let mut total_bytes = 0usize;
 
@@ -353,10 +354,11 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     // merge the data from the workers
     let mut all_the_maps = vec![];
     for h in worker_handlers {
-        let (map, linecount, fieldcount, fieldskipped) = h.join().unwrap();
+        let (map, linecount, fieldcount, fieldskipped, lines_skipped) = h.join().unwrap();
         total_rowcount += linecount;
         total_fieldcount += fieldcount;
         total_fieldskipped += fieldskipped;
+        total_lines_skipped += lines_skipped;
         all_the_maps.push(map);
     }
     let main_map = if !cfg.no_output {
@@ -466,7 +468,10 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     if !cfg.no_output {
+        let mut line_count = 0u64;
+        let total_lines_expected = thekeys.len() as u64;
         if !cfg.csv_output {
+            let mut print_skipped = false; // for the stuff after head and before tail
             let mut celltable = Table::new();
             celltable.set_format(*format::consts::FORMAT_NO_BORDER_LINE_SEPARATOR);
             {
@@ -506,7 +511,37 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 celltable.set_titles(row);
             }
 
-            for ff in thekeys.iter() {
+            // let check_ht: &Fn(u64) -> bool = match (cfg.head.clone(), cfg.tail.clone()) {
+            //     (None, None) =>                                 &|l| -> bool { if l > 0 {false } else { true}},
+            //     (Some(head), None) =>                 &|l| -> bool  { if head < l { false } else { true } },
+            //     (None, Some( tail)) =>                 &|l| -> bool  { if tail < (total_lines_expected-l) { false } else { true }},
+            //     (Some( head), Some( tail)) => &|l| -> bool { { true }},
+            // };
+
+
+            'KEYS_CELL_LOOP: for ff in thekeys.iter() {
+                let cc = main_map.get(*ff).unwrap();
+
+                if let Some(count_ge) = cfg.count_ge {
+                    if cc.count > count_ge { continue 'KEYS_CELL_LOOP; } // to skip
+                }
+                if let Some(count_le) = cfg.count_le {
+                    if cc.count < count_le { continue 'KEYS_CELL_LOOP; } // to skip
+                }
+
+                line_count += 1;
+
+                let print_this_line: bool = match (cfg.head, cfg.tail) {
+                    (None, None) => {true}
+                    (Some(head), None) =>
+                        if head >= line_count { true } else { false },
+                    (None, Some( tail)) => if tail > (total_lines_expected-line_count) { true } else { false }
+                    (Some( head), Some( tail)) => {
+                        if head >= line_count || tail > (total_lines_expected-line_count) { true } else {false}
+                    },
+                };
+                if !print_this_line { continue 'KEYS_CELL_LOOP }
+
                 let mut vcell = vec![];
                 ff.split(KEY_DEL).for_each(|x| {
                     if x.len() == 0 {
@@ -515,7 +550,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                         vcell.push(Cell::new(&x));
                     }
                 });
-                let cc = main_map.get(*ff).unwrap();
+
 
                 if !cfg.no_record_count {
                     vcell.push(Cell::new(&format!("{}", cc.count)));
@@ -597,7 +632,27 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 line_out.push('\n');
                 writer.write_all(&line_out.as_bytes())?;
             }
-            for ff in thekeys.iter() {
+            'KEYS_CSV_LOOP: for ff in thekeys.iter() {
+                let cc = main_map.get(*ff).unwrap();
+                if let Some(count_ge) = cfg.count_ge {
+                    if cc.count > count_ge { continue 'KEYS_CSV_LOOP; } // to skip
+                }
+                if let Some(count_le) = cfg.count_le {
+                    if cc.count < count_le { continue 'KEYS_CSV_LOOP; } // to skip
+                }
+
+                line_count += 1;
+                let print_this_line: bool = match (cfg.head, cfg.tail) {
+                    (None, None) => {true}
+                    (Some(head), None) =>
+                        if head >= line_count { true } else { false },
+                    (None, Some( tail)) => if tail > (total_lines_expected-line_count) { true } else { false }
+                    (Some( head), Some( tail)) => {
+                        if head >= line_count || tail > (total_lines_expected-line_count) { true } else {false}
+                    },
+                };
+                if !print_this_line { continue 'KEYS_CSV_LOOP }
+
                 line_out.clear();
                 let keyv: Vec<&str> = ff.split(KEY_DEL).collect();
                 for i in 0..keyv.len() {
@@ -608,7 +663,6 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     if i < keyv.len() - 1 { line_out.push_str(&cfg.od); }
                 }
-                let cc = main_map.get(*ff).unwrap();
                 if !cfg.no_record_count {
                     line_out.push_str(&format!("{}{}", &cfg.od, cc.count));
                 }
@@ -667,15 +721,19 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     if total_fieldskipped > 0 {
-        eprintln!("Some fields were skipped {}.  They could not be parsed a numeric.", total_fieldskipped);
+        eprintln!("Some fields were skipped {}, as they could not be parsed as numeric.", total_fieldskipped);
     }
+    if total_lines_skipped > 0 {
+        eprintln!("Note {} records/lines were filtered", total_lines_skipped);
+    }
+
     Ok(())
 }
 
-fn worker_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize, usize) {
+fn worker_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize, usize, usize) {
     // return lines / fields
     match _worker_re(&send_blocks, cfg, recv) {
-        Ok((map, lines, fields, fieldskipped)) => (map, lines, fields, fieldskipped),
+        Ok((map, lines, fields, fieldskipped, lines_skipped)) => (map, lines, fields, fieldskipped, lines_skipped),
         Err(e) => {
             let err_msg = format!("Unable to process inner file - likely compressed or not UTF8 text: {}", e);
             panic!(err_msg);
@@ -709,7 +767,7 @@ fn _worker_re(
     send_blocks: &crossbeam_channel::Sender<Vec<u8>>,
     cfg: &CliCfg,
     recv: &crossbeam_channel::Receiver<Option<FileSlice>>,
-) -> Result<(MyMap, usize, usize, usize), Box<dyn std::error::Error>> {
+) -> Result<(MyMap, usize, usize, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = create_map();
@@ -725,6 +783,7 @@ fn _worker_re(
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
     let mut fieldskipped = 0;
+    let mut lines_skipped = 0;
     let mut rowcount = 0;
     let mut _skipped = 0;
     let mut cl = re.capture_locations();
@@ -799,9 +858,10 @@ fn _worker_re(
                             }
                         },
                         _ => {
-                            let (fc, fs) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
+                            let (fc, fs, ls) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
                             fieldcount += fc;
                             fieldskipped += fs;
+                            lines_skipped += ls;
                             // cnt_rec += 1;
                         }
                     }
@@ -815,12 +875,12 @@ fn _worker_re(
         }
     }
     if let Some(mut sch) = sch { sch.print_schema(&cfg);}
-    Ok((map, rowcount, fieldcount, fieldskipped))
+    Ok((map, rowcount, fieldcount, fieldskipped, lines_skipped))
 }
 
-fn worker_csv(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize, usize) {
+fn worker_csv(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize, usize, usize) {
     match _worker_csv(&send_blocks, cfg, recv) {
-        Ok((map, lines, fields, fieldskipped)) => (map, lines, fields, fieldskipped),
+        Ok((map, lines, fields, fieldskipped, lines_skipped)) => (map, lines, fields, fieldskipped, lines_skipped),
         Err(e) => {
             let err_msg = format!("Unable to process inner block - likely compressed or not UTF8 text: {}", e);
             panic!(err_msg);
@@ -832,7 +892,7 @@ fn _worker_csv(
     send_blocks: &crossbeam_channel::Sender<Vec<u8>>,
     cfg: &CliCfg,
     recv: &crossbeam_channel::Receiver<Option<FileSlice>>,
-) -> Result<(MyMap, usize, usize, usize), Box<dyn std::error::Error>> {
+) -> Result<(MyMap, usize, usize, usize, usize), Box<dyn std::error::Error>> {
     // return lines / fields
 
     let mut map = create_map();
@@ -842,6 +902,7 @@ fn _worker_csv(
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
     let mut fieldskipped = 0;
+    let mut lines_skipped = 0;
     let mut rowcount = 0;
 
     let mut latin_str_buff = String::with_capacity(246);
@@ -891,9 +952,10 @@ fn _worker_csv(
                                     }
                                 },
                                 _ => {
-                                    let (fc, fs) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+                                    let (fc, fs, ls) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
                                     fieldcount += fc;
                                     fieldskipped += fs;
+                                    lines_skipped += ls;
                                 }
                             };
                             v.clear();
@@ -926,9 +988,10 @@ fn _worker_csv(
                                     }
                                 },
                                 _ => {
-                                    let (fc, fs) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
+                                    let (fc, fs, ls) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
                                     fieldcount += fc;
                                     fieldskipped += fs;
+                                    lines_skipped += ls;
                                     cnt_rec += 1;
                                 }
                             };
@@ -957,13 +1020,13 @@ fn _worker_csv(
     }
     if let Some(mut sch) = sch { sch.print_schema(&cfg);}
 
-    Ok((map, rowcount, fieldcount, fieldskipped))
+    Ok((map, rowcount, fieldcount, fieldskipped, lines_skipped))
 }
 
-fn worker_multi_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize, usize) {
+fn worker_multi_re(send_blocks: &crossbeam_channel::Sender<Vec<u8>>, cfg: &CliCfg, recv: &crossbeam_channel::Receiver<Option<FileSlice>>) -> (MyMap, usize, usize, usize, usize) {
     // return lines / fields
     match _worker_multi_re(&send_blocks, cfg, recv) {
-        Ok((map, lines, fields, fieldskipped)) => (map, lines, fields, fieldskipped),
+        Ok((map, lines, fields, fieldskipped, lines_skipped)) => (map, lines, fields, fieldskipped, lines_skipped),
         Err(e) => {
             let err_msg = format!("Unable to process inner file - likely compressed or not UTF8 text: {}", e);
             panic!(err_msg);
@@ -995,7 +1058,7 @@ fn _worker_multi_re(
     send_blocks: &crossbeam_channel::Sender<Vec<u8>>,
     cfg: &CliCfg,
     recv: &crossbeam_channel::Receiver<Option<FileSlice>>,
-) -> Result<(MyMap, usize, usize, usize), Box<dyn std::error::Error>> {
+) -> Result<(MyMap, usize, usize, usize, usize), Box<dyn std::error::Error>> {
     let mut map = create_map();
 
     let mut re_es = vec![];
@@ -1012,6 +1075,7 @@ fn _worker_multi_re(
     let mut buff = String::with_capacity(256); // dyn buffer
     let mut fieldcount = 0;
     let mut fieldskipped = 0;
+    let mut lines_skipped = 0;
     let mut rowcount = 0;
     let mut linecount = 0;
     let mut _skipped = 0;
@@ -1097,9 +1161,10 @@ fn _worker_multi_re(
                                 }
                             },
                             _ => {
-                                let (fc, fs) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
+                                let (fc, fs, ls) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
                                 fieldcount += fc;
                                 fieldskipped += fs;
+                                lines_skipped += ls;
                             }
                         }
                         if cfg.verbose > 2 {
@@ -1123,7 +1188,7 @@ fn _worker_multi_re(
         }
     }
     if let Some(mut sch) = sch { sch.print_schema(&cfg);}
-    Ok((map, rowcount, fieldcount, fieldskipped))
+    Ok((map, rowcount, fieldcount, fieldskipped, lines_skipped))
 }
 
 fn ascii_line_fixup(slice: &[u8], start: usize, str: &mut String) {

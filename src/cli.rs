@@ -8,6 +8,8 @@ use structopt::StructOpt;
 use structopt::clap::AppSettings::*;
 use std::str::FromStr;
 
+use pcre2::bytes::{CaptureLocations as CaptureLocations_pcre2, Captures as Captures_pcre2, Regex as Regex_pre2};
+
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 fn get_default_parse_thread_no() -> usize {
@@ -300,6 +302,30 @@ pub struct CliCfg {
     /// subgroups or from csv positions.
     pub sample_schema: Option<u32>,
 
+    #[structopt(long = "where_re", name = "where_re", parse(try_from_str = field_and_regex))]
+    /// keep certain fields only if it matches matches a corresponding re
+    pub where_re: Option<Vec<(usize,Regex_pre2)>>,
+
+    #[structopt(long = "where_not_re", name = "where_not_re", parse(try_from_str = field_and_regex))]
+    /// keep certain fields only if it matches matches a corresponding re
+    pub where_not_re: Option<Vec<(usize,Regex_pre2)>>,
+
+    #[structopt(long = "count_ge", name = "count_ge")]
+    /// Only write records with count greater than or equal to X  (>=X)
+    pub count_le: Option<(u64)>,
+
+    #[structopt(long = "count_le", name = "count_le")]
+    /// Only write records with count less than or equal to X  (>=X)
+    pub count_ge: Option<(u64)>,
+
+    #[structopt(long = "head", name = "head")]
+    /// Only write first X records
+    pub head: Option<(u64)>,
+
+    #[structopt(long = "tail", name = "tail")]
+    /// Only write first X records
+    pub tail: Option<(u64)>,
+
     #[structopt(short = "E", long = "print_examples")]
     /// Prints example usage scenarious - extra help
     pub print_examples: bool,
@@ -365,6 +391,24 @@ fn alias_parser(s: &str) -> Result<(usize, String)> {
     };
     let string = String::from(v[1]);
     Ok((size, string))
+}
+
+fn field_and_regex(s: &str) -> Result<(usize, Regex_pre2)> {
+    let v = s.split(':').collect::<Vec<_>>();
+    if v.len() != 2 {
+        Err(format!("regex must come in pairs split by a : you specified: \"{}\"", &s))?;
+    }
+
+    let size = match v[0].parse() {
+        Err(e) => Err(format!("regex must be number:<Regex> - this is not a integer \"{}\" found in {}", v[0], &e))?,
+        Ok(0) => Err(format!("field must 1 or greater"))?,
+        Ok(s) => s-1,
+    };
+    let regex = match Regex_pre2::new(v[1]) {
+        Err(e) => Err(format!("regex error for \"{}\" error {}", v[1], &e))?,
+        Ok(re) => re,
+    };
+    Ok((size, regex))
 }
 
 fn escape_parser(s: &str) -> Result<char> {

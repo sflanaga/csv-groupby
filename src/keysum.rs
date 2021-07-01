@@ -186,7 +186,7 @@ pub fn schema_rec<T>(matrix: &mut Vec<Vec<String>>, ss: &mut String, line: &str,
     (0,0)
 }
 
-pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> (usize,usize)
+pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map: &mut MyMap, cfg: &CliCfg, rowcount: &mut usize) -> (usize,usize,usize)
     where
         <T as std::ops::Index<usize>>::Output: AsRef<str>,
         T: std::ops::Index<usize> + std::fmt::Debug,
@@ -195,7 +195,9 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
     ss.clear();
 
     let mut fieldcount = 0usize;
-    let mut skipfields = 0usize;
+    let mut skip_parse_fields = 0usize;
+    let mut lines_filtered = 0usize;
+    use pcre2::bytes::{CaptureLocations as CaptureLocations_pcre2, Captures as Captures_pcre2, Regex as Regex_pre2};
 
     if cfg.verbose >= 3 {
         if line.len() > 0 {
@@ -204,11 +206,35 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
             eprintln!("DBG:  {:?}", &record);
         }
     }
+
+    if let Some(ref where_re) = cfg.where_re {
+        for (fi, re) in where_re {
+            if *fi < rec_len {
+                match re.is_match(record[*fi].as_ref().as_bytes()) {
+                    Err(e) => eprintln!("error trying to match \"{}\" with RE \"{}\" for where check, error: {}", record[*fi].as_ref(), re.as_str(), &e),
+                    Ok(b) => if !b { return (0, 0, 1) },
+                }
+            }
+        }
+    }
+
+    if let Some(ref where_not_re) = cfg.where_not_re {
+        for (fi, re) in where_not_re {
+            if *fi < rec_len {
+                match re.is_match(record[*fi].as_ref().as_bytes()) {
+                    Err(e) => eprintln!("error trying to match \"{}\" with RE \"{}\" for where_not check, error: {}", record[*fi].as_ref(), re.as_str(), &e),
+                    Ok(b) => if b { return (0, 0, 1) },
+                }
+            }
+        }
+    }
+
     if cfg.key_fields.len() > 0 {
         fieldcount += rec_len;
         for i in 0..cfg.key_fields.len() {
             let index = cfg.key_fields[i];
             if index < rec_len {
+                // re.is_match(&record[index].as_ref().as_bytes());
                 ss.push_str(&record[index].as_ref());
             } else {
                 ss.push_str(&cfg.null);
@@ -244,7 +270,7 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
             let v = &record[*index].as_ref();
             match v.parse::<f64>() {
                 Err(_) => {
-                    skipfields += 1;
+                    skip_parse_fields += 1;
                     if cfg.verbose > 1 {
                         eprintln!("Error parsing string \"{}\" as a float so skipping it. Intended for {} slot: {}", v, comment, place);
                     }
@@ -295,7 +321,7 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
                 let v = &record[index];
                 match v.as_ref().parse::<f64>() {
                     Err(_) => {
-                        skipfields += 1;
+                        skip_parse_fields += 1;
                         if cfg.verbose > 2 {
                             eprintln!("error parsing string |{}| as a float for summary index: {} so pretending value is 0", v.as_ref(), index);
                         }
@@ -360,7 +386,7 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
         }
     }
 
-    (fieldcount,skipfields)
+    (fieldcount,skip_parse_fields, lines_filtered)
 }
 
 fn merge_f64<F>(x: Option<f64>, y: Option<f64>, pickone: F) -> Option<f64>
