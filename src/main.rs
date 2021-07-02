@@ -1,4 +1,3 @@
-
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
@@ -88,7 +87,7 @@ fn main() {
 
 fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>,
                send: &crossbeam_channel::Sender<Option<FileSlice>>,
-               filesend: &crossbeam_channel::Sender<Option<PathBuf>> ) {
+               filesend: &crossbeam_channel::Sender<Option<PathBuf>>) {
     let start_f = Instant::now();
     let startcpu = ProcessTime::now();
 
@@ -392,7 +391,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     let mut thekeys: Vec<_> = main_map.keys().clone().collect();
 
     // may add other comparisons but for now - if ON just this one
-    let chosen_cmp = {
+    let excel_sort_cmp = {
         // partially taken from:
         // https://github.com/DanielKeep/rust-scan-rules/blob/master/src/input.rs#L610-L620
         // but enhanced as a generic Ordering
@@ -435,9 +434,32 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             Equal
         }
     };
+
+    let count_cmp_asc = {
+        |l_k: &&str, r_k: &&str| -> Ordering {
+            let ks_l = main_map.get(*l_k).unwrap();
+            let ks_r = main_map.get(*r_k).unwrap();
+            ks_l.count.cmp(&ks_r.count)
+        }
+    };
+
+    let count_cmp_dsc = {
+        |l_k: &&str, r_k: &&str| -> Ordering {
+            let ks_l = main_map.get(*l_k).unwrap();
+            let ks_r = main_map.get(*r_k).unwrap();
+            ks_r.count.cmp(&ks_l.count)
+        }
+    };
+
     if !cfg.disable_key_sort {
         let cpu_keysort_s = ProcessTime::now();
-        thekeys.sort_unstable_by(|l, r| { chosen_cmp(&l.as_str(), &r.as_str()) });
+        if cfg.count_dsc {
+            thekeys.sort_unstable_by(|l, r| { count_cmp_dsc(&l.as_str(), &r.as_str()) });
+        } else if cfg.count_asc {
+            thekeys.sort_unstable_by(|l, r| { count_cmp_asc(&l.as_str(), &r.as_str()) });
+        } else {
+            thekeys.sort_unstable_by(|l, r| { excel_sort_cmp(&l.as_str(), &r.as_str()) });
+        }
         if cfg.verbose > 0 {
             let elapsedcpu: Duration = cpu_keysort_s.elapsed();
             let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1_000_000_000.0);
@@ -532,15 +554,15 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 line_count += 1;
 
                 let print_this_line: bool = match (cfg.head, cfg.tail) {
-                    (None, None) => {true}
+                    (None, None) => { true }
                     (Some(head), None) =>
                         if head >= line_count { true } else { false },
-                    (None, Some( tail)) => if tail > (total_lines_expected-line_count) { true } else { false }
-                    (Some( head), Some( tail)) => {
-                        if head >= line_count || tail > (total_lines_expected-line_count) { true } else {false}
-                    },
+                    (None, Some(tail)) => if tail > (total_lines_expected - line_count) { true } else { false }
+                    (Some(head), Some(tail)) => {
+                        if head >= line_count || tail > (total_lines_expected - line_count) { true } else { false }
+                    }
                 };
-                if !print_this_line { continue 'KEYS_CELL_LOOP }
+                if !print_this_line { continue 'KEYS_CELL_LOOP; }
 
                 let mut vcell = vec![];
                 ff.split(KEY_DEL).for_each(|x| {
@@ -557,7 +579,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 for x in &cc.nums {
                     match x {
-                        Some(x) =>vcell.push(Cell::new(&format!("{}", x))),
+                        Some(x) => vcell.push(Cell::new(&format!("{}", x))),
                         None => vcell.push(Cell::new(&format!("{}", &cfg.null))),
                     };
                 }
@@ -570,7 +592,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 for x in &cc.strs {
                     match x {
-                        Some(x) =>vcell.push(Cell::new(&format!("{}", x))),
+                        Some(x) => vcell.push(Cell::new(&format!("{}", x))),
                         None => vcell.push(Cell::new(&format!("{}", &cfg.null))),
                     };
                 }
@@ -643,15 +665,15 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
                 line_count += 1;
                 let print_this_line: bool = match (cfg.head, cfg.tail) {
-                    (None, None) => {true}
+                    (None, None) => { true }
                     (Some(head), None) =>
                         if head >= line_count { true } else { false },
-                    (None, Some( tail)) => if tail > (total_lines_expected-line_count) { true } else { false }
-                    (Some( head), Some( tail)) => {
-                        if head >= line_count || tail > (total_lines_expected-line_count) { true } else {false}
-                    },
+                    (None, Some(tail)) => if tail > (total_lines_expected - line_count) { true } else { false }
+                    (Some(head), Some(tail)) => {
+                        if head >= line_count || tail > (total_lines_expected - line_count) { true } else { false }
+                    }
                 };
-                if !print_this_line { continue 'KEYS_CSV_LOOP }
+                if !print_this_line { continue 'KEYS_CSV_LOOP; }
 
                 line_out.clear();
                 let keyv: Vec<&str> = ff.split(KEY_DEL).collect();
@@ -668,7 +690,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 for x in &cc.nums {
                     match x {
-                        Some(x) =>line_out.push_str(&format!("{}{}", &cfg.od, x)),
+                        Some(x) => line_out.push_str(&format!("{}{}", &cfg.od, x)),
                         None => line_out.push_str(&format!("{}{}", &cfg.od, &cfg.null)),
                     };
                 }
@@ -678,7 +700,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 for x in &cc.strs {
                     line_out.push_str(&cfg.od);
                     match x {
-                        Some(x) =>line_out.push_str(&format!("{}", x)),
+                        Some(x) => line_out.push_str(&format!("{}", x)),
                         None => line_out.push_str(&cfg.null),
                     };
                 }
@@ -818,13 +840,13 @@ fn _worker_re(
                 &fc.block[0..fc.len]
             };
 
-            'LINE_LOOP: for (inner_count, line) in slice.split(|c| *c==b'\n').enumerate() {
+            'LINE_LOOP: for (inner_count, line) in slice.split(|c| *c == b'\n').enumerate() {
                 let line = match std::str::from_utf8(&line) {
                     Err(e) => {
                         ascii_line_fixup_full(line, &mut err_line_fix);
                         eprintln!("skipping line due with UTF8 decoding error (try ISO-8859 option?): {}\n\tline: {}", e, &err_line_fix);
                         continue 'LINE_LOOP;
-                    },
+                    }
                     Ok(line) => line
                 };
 
@@ -854,9 +876,9 @@ fn _worker_re(
                         Some(ref mut sch) => {
                             sch.schema_rec(&v, v.len());
                             if sch.done() {
-                                break 'BLOCK_LOOP
+                                break 'BLOCK_LOOP;
                             }
-                        },
+                        }
                         _ => {
                             let (fc, fs, ls) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
                             fieldcount += fc;
@@ -874,7 +896,7 @@ fn _worker_re(
             send_blocks.send(fc.block)?;
         }
     }
-    if let Some(mut sch) = sch { sch.print_schema(&cfg);}
+    if let Some(mut sch) = sch { sch.print_schema(&cfg); }
     Ok((map, rowcount, fieldcount, fieldskipped, lines_skipped))
 }
 
@@ -948,9 +970,9 @@ fn _worker_csv(
                                 Some(ref mut sch) => {
                                     sch.schema_rec(&v, v.len());
                                     if sch.done() {
-                                        break 'BLOCK_LOOP
+                                        break 'BLOCK_LOOP;
                                     }
-                                },
+                                }
                                 _ => {
                                     let (fc, fs, ls) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
                                     fieldcount += fc;
@@ -959,20 +981,18 @@ fn _worker_csv(
                                 }
                             };
                             v.clear();
-                        },
+                        }
                         Err(e) => {
                             match e.kind() {
-                                csv::ErrorKind::Utf8 {ref err, pos} => {
+                                csv::ErrorKind::Utf8 { ref err, pos } => {
                                     if let Some(pos) = pos {
                                         ascii_line_fixup(&fc.block, pos.byte() as usize, &mut err_line_fix);
-                                        eprintln!("skipping line due to bad UTF8 codes in file (try ISO-8859 option)\n\tline:{}",&err_line_fix);
+                                        eprintln!("skipping line due to bad UTF8 codes in file (try ISO-8859 option)\n\tline:{}", &err_line_fix);
                                     }
-
-                                },
+                                }
                                 _ => eprintln!("skipping line due to err: {:?}", e),
-
                             }
-                        },
+                        }
                     }
                 }
             } else {
@@ -984,9 +1004,9 @@ fn _worker_csv(
                                 Some(ref mut sch) => {
                                     sch.schema_rec(&record, record.len());
                                     if sch.done() {
-                                        break 'BLOCK_LOOP
+                                        break 'BLOCK_LOOP;
                                     }
-                                },
+                                }
                                 _ => {
                                     let (fc, fs, ls) = store_rec(&mut buff, "", &record, record.len(), &mut map, &cfg, &mut rowcount);
                                     fieldcount += fc;
@@ -995,21 +1015,18 @@ fn _worker_csv(
                                     cnt_rec += 1;
                                 }
                             };
-                        },
+                        }
                         Err(e) => {
                             match e.kind() {
-                                csv::ErrorKind::Utf8 {ref err, pos} => {
+                                csv::ErrorKind::Utf8 { ref err, pos } => {
                                     if let Some(pos) = pos {
                                         ascii_line_fixup(&fc.block, pos.byte() as usize, &mut err_line_fix);
-                                        eprintln!("skipping line due to bad UTF8 codes in file (try ISO-8859 option)\n\tline:{}",&err_line_fix);
+                                        eprintln!("skipping line due to bad UTF8 codes in file (try ISO-8859 option)\n\tline:{}", &err_line_fix);
                                     }
-
-                                },
+                                }
                                 _ => eprintln!("skipping line due to err: {:?}", e),
-
                             }
-
-                        },
+                        }
                     }
                 }
             }
@@ -1018,7 +1035,7 @@ fn _worker_csv(
             send_blocks.send(fc.block)?;
         }
     }
-    if let Some(mut sch) = sch { sch.print_schema(&cfg);}
+    if let Some(mut sch) = sch { sch.print_schema(&cfg); }
 
     Ok((map, rowcount, fieldcount, fieldskipped, lines_skipped))
 }
@@ -1157,9 +1174,9 @@ fn _worker_multi_re(
                             Some(ref mut sch) => {
                                 sch.schema_rec(&v, v.len());
                                 if sch.done() {
-                                    break 'BLOCK_LOOP
+                                    break 'BLOCK_LOOP;
                                 }
-                            },
+                            }
                             _ => {
                                 let (fc, fs, ls) = store_rec(&mut buff, "", &v, v.len(), &mut map, &cfg, &mut rowcount);
                                 fieldcount += fc;
@@ -1187,7 +1204,7 @@ fn _worker_multi_re(
             send_blocks.send(fc.block)?;
         }
     }
-    if let Some(mut sch) = sch { sch.print_schema(&cfg);}
+    if let Some(mut sch) = sch { sch.print_schema(&cfg); }
     Ok((map, rowcount, fieldcount, fieldskipped, lines_skipped))
 }
 

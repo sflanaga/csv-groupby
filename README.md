@@ -192,13 +192,8 @@ TODO/ideas:
 --count_ge <num>
 --count_le
 
---keep_re 1:<re for field #1> 2:<re for field #2>
---keep_ge|gt|le|lt 1:<string_value>
---keep_num_ge|gt|le|lt 1:<number value>
---keep_count_ge|le
---sort_count_desc
+~--sort_count_desc
 --sort_count_asc
---limit_output
 
 ```
 

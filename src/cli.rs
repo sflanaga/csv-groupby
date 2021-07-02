@@ -310,14 +310,6 @@ pub struct CliCfg {
     /// keep certain fields only if it matches matches a corresponding re
     pub where_not_re: Option<Vec<(usize,Regex_pre2)>>,
 
-    #[structopt(long = "count_ge", name = "count_ge")]
-    /// Only write records with count greater than or equal to X  (>=X)
-    pub count_le: Option<(u64)>,
-
-    #[structopt(long = "count_le", name = "count_le")]
-    /// Only write records with count less than or equal to X  (>=X)
-    pub count_ge: Option<(u64)>,
-
     #[structopt(long = "head", name = "head")]
     /// Only write first X records
     pub head: Option<(u64)>,
@@ -325,6 +317,22 @@ pub struct CliCfg {
     #[structopt(long = "tail", name = "tail")]
     /// Only write first X records
     pub tail: Option<(u64)>,
+
+    #[structopt(long = "count_dsc", name = "count_dsc", conflicts_with="count_asc")]
+    /// Sort output with descending counts
+    pub count_dsc: bool,
+
+    #[structopt(long = "count_asc", name = "count_asc", conflicts_with="count_dsc")]
+    /// Sort output with ascending counts
+    pub count_asc: bool,
+
+    #[structopt(long = "count_ge", name = "count_ge")]
+    /// Only write records with count greater than or equal to X  (>=X)
+    pub count_le: Option<(u64)>,
+
+    #[structopt(long = "count_le", name = "count_le")]
+    /// Only write records with count less than or equal to X  (>=X)
+    pub count_ge: Option<(u64)>,
 
     #[structopt(short = "E", long = "print_examples")]
     /// Prints example usage scenarious - extra help
