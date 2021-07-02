@@ -2,7 +2,7 @@
 build = "build.rs"
 edition = '2018'
 name = "csv-groupby"
-version = "0.9.1"
+version = "0.10.0"
 authors = ["Steve Flanagan"]
 
 description="execute a sql-like group-by on arbitrary text or csv files"
