@@ -301,17 +301,14 @@ pub fn store_rec<T>(ss: &mut String, line: &str, record: &T, rec_len: usize, map
         }
     };
 
-    let mut startdestpos = 0;
     if cfg.sum_fields.len() > 0 {
-        mergefields(&cfg.sum_fields, startdestpos, "sum", &sumf64);
+        mergefields(&cfg.sum_fields, 0, "sum", &sumf64);
     }
     if cfg.min_num_fields.len() > 0 {
-        startdestpos += cfg.sum_fields.len();
-        mergefields(&cfg.min_num_fields, startdestpos, "min", &minf64);
+        mergefields(&cfg.min_num_fields,cfg.sum_fields.len(),"min", &minf64);
     }
     if cfg.max_num_fields.len() > 0 {
-        startdestpos += cfg.min_num_fields.len();
-        mergefields(&cfg.max_num_fields, startdestpos, "max", &maxf64);
+        mergefields(&cfg.max_num_fields, cfg.min_num_fields.len() + cfg.sum_fields.len(), "max", &maxf64);
     }
 
     if cfg.avg_fields.len() > 0 {
