@@ -17,7 +17,7 @@ pub fn gettid() -> usize {
     unsafe { winapi::um::processthreadsapi::GetCurrentThreadId() as usize }
 }
 
-#[cfg(any(target_os = "linux", target_os = "android"))]
+#[cfg(any(not(target_os = "windows")))]
 pub fn gettid() -> usize {
     unsafe { libc::syscall(libc::SYS_gettid) as usize }
 }
@@ -530,7 +530,7 @@ pub fn per_file_thread(
 }
 
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 pub fn get_reader_writer() -> (impl BufRead, impl Write) {
     use std::os::unix::io::FromRawFd;
     let stdin = unsafe { File::from_raw_fd(0) };

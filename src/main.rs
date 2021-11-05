@@ -41,7 +41,7 @@ use std::cmp::Ordering::{Less, Greater, Equal};
 use std::hash::{BuildHasher, Hash};
 use lazy_static;
 //pub static GLOBAL_TRACKER: System = System; //CounterAtomicUsize = CounterAtomicUsize;
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 #[global_allocator]
 pub static GLOBAL_TRACKER: jemallocator::Jemalloc = jemallocator::Jemalloc;
 //pub static GLOBAL_TRACKER: std::alloc::System = std::alloc::System;

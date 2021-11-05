@@ -2,9 +2,9 @@ use std::alloc::{GlobalAlloc, Layout, System};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 use jemalloc_ctl::{epoch, stats};
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 use jemallocator::Jemalloc;
 
 #[derive(Debug)]
@@ -66,7 +66,7 @@ impl GetAlloc for System {
 }
 
 
-#[cfg(target_os = "linux")]
+#[cfg(not(target_os = "windows"))]
 impl GetAlloc for Jemalloc {
     fn get_alloc(&self) -> usize {
         epoch::advance().unwrap();

@@ -47,7 +47,7 @@ path = "src/quick.rs"
 name = "append"
 path = "src/append.rs"
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 jemallocator = "0.3.2"
 jemalloc-ctl = "0.3.3"
 
