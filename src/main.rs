@@ -142,10 +142,11 @@ fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, io_status: &mu
             if tot > 0 {
                 let per = (cur as f64 / tot as f64)*100.0;
                 
-                eprint!("{}{}Merging map entries {} of {}  {:.2}% complete{}{}", 
+                eprint!("{}{}Merging map entries {} of {}  {:.2}% complete  mem: {}{}{}", 
                     Clear(CurrentLine),
                     SetForegroundColor(Color::Green),
-                    cur, tot, per, return_or_not, ResetColor);
+                    cur, tot, per, mem_metric_digit(GLOBAL_TRACKER.get_alloc(), 4),
+                    return_or_not, ResetColor);
             } else {
                 eprint!("{}{}Merging map ....{}{}", 
                     Clear(CurrentLine),
