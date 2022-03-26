@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
+use atty::Stream;
 use crossterm::style::{SetForegroundColor, Color, ResetColor};
 use pcre2::bytes::{CaptureLocations as CaptureLocations_pcre2, Captures as Captures_pcre2, Regex as Regex_pre2};
 use prettytable::{Cell, format, Row, Table};
