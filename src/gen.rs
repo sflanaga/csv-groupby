@@ -229,6 +229,20 @@ impl IoSlicerStatus {
     }
 }
 
+pub struct MergeStatus {
+    pub current: AtomicUsize,
+    pub total: AtomicUsize,
+}
+
+impl MergeStatus {
+    pub fn new() -> MergeStatus {
+        MergeStatus {
+            current: AtomicUsize::new(0),
+            total: AtomicUsize::new(0),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct FileSlice {
     pub block: Vec<u8>,

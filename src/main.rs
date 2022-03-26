@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 #![allow(unused_imports)]
 
-use atty::Stream;
+use crossterm::style::{SetForegroundColor, Color, ResetColor};
 use pcre2::bytes::{CaptureLocations as CaptureLocations_pcre2, Captures as Captures_pcre2, Regex as Regex_pre2};
 use prettytable::{Cell, format, Row, Table};
 use regex::{CaptureLocations, Regex};
 use std::alloc::{System, handle_alloc_error};
+use std::sync::atomic::AtomicIsize;
 use std::{
     cmp::Ordering,
     io::prelude::*,
@@ -25,9 +26,8 @@ mod testre;
 mod keysum;
 
 use cli::{get_cli, CliCfg};
-use colored::Colorize;
 use cpu_time::ProcessTime;
-use gen::{distro_format, io_thread_slicer, mem_metric_digit, per_file_thread, FileSlice, IoSlicerStatus, get_reader_writer};
+use gen::{distro_format, io_thread_slicer, mem_metric_digit, per_file_thread, FileSlice, IoSlicerStatus, MergeStatus, get_reader_writer};
 
 use ignore::WalkBuilder;
 use testre::testre;
@@ -85,37 +85,43 @@ fn main() {
     }
 }
 
-fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, status: &mut Arc<IoSlicerStatus>,
+fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, io_status: &mut Arc<IoSlicerStatus>, 
+               merge_status: &Arc<MergeStatus>,
+               phase: &Arc<AtomicIsize>,
                send: &crossbeam_channel::Sender<Option<FileSlice>>,
                filesend: &crossbeam_channel::Sender<Option<PathBuf>>) {
     let start_f = Instant::now();
     let startcpu = ProcessTime::now();
+   
+    use crossterm::{terminal::Clear, terminal::ClearType::CurrentLine, style::{Color, ResetColor, SetForegroundColor}};
 
     let (sleeptime, return_or_not) = if verbosity > 0 {
         // slower ticket when verbose output is on and newlines
-        (1000, "\n")
+        (1000, "\n".to_string())
     } else {
         // action ticket if not other output on
-        (250, "                          \r")
+        (250, format!("{}","\r"))
     };
     loop {
         thread::sleep(Duration::from_millis(sleeptime));
         if thread_stopper.load(Relaxed) {
             break;
         }
-        let total_bytes = status.bytes.load(std::sync::atomic::Ordering::Relaxed);
-        let file_count = status.files.load(std::sync::atomic::Ordering::Relaxed);
-        let elapsed = start_f.elapsed();
-        let sec: f64 = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1_000_000_000.0);
-        let rate = (total_bytes as f64 / sec) as usize;
-        let elapsedcpu: Duration = startcpu.elapsed();
-        let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1_000_000_000.0);
-        {
-            let curr_file = status.curr_file.lock().unwrap();
-            eprint!(
-                "{}",
-                format!(
-                    " q: {}/{}/{}  {}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}  mem: {}{}",
+        let phasel = phase.load(std::sync::atomic::Ordering::Relaxed);
+        if phasel == ProcPhase::READ as isize {
+            let total_bytes = io_status.bytes.load(std::sync::atomic::Ordering::Relaxed);
+            let file_count = io_status.files.load(std::sync::atomic::Ordering::Relaxed);
+            let elapsed = start_f.elapsed();
+            let sec: f64 = (elapsed.as_secs() as f64) + (elapsed.subsec_nanos() as f64 / 1_000_000_000.0);
+            let rate = (total_bytes as f64 / sec) as usize;
+            let elapsedcpu: Duration = startcpu.elapsed();
+            let seccpu: f64 = (elapsedcpu.as_secs() as f64) + (elapsedcpu.subsec_nanos() as f64 / 1_000_000_000.0);
+            {
+                let curr_file = io_status.curr_file.lock().unwrap();
+                
+                eprint!("{}{} q: {}/{}/{}  {}  rate: {}/s at  time(sec): {:.3}  cpu(sec): {:.3}  curr: {}  mem: {}{}{}",
+                    Clear(CurrentLine),
+                    SetForegroundColor(Color::Green),
                     send.len(),
                     file_count,
                     filesend.len(),
@@ -125,13 +131,40 @@ fn stat_ticker(verbosity: usize, thread_stopper: Arc<AtomicBool>, status: &mut A
                     seccpu,
                     curr_file,
                     mem_metric_digit(GLOBAL_TRACKER.get_alloc(), 4),
-                    return_or_not
-                )
-                    .green()
-            );
-        }
+                    return_or_not,
+                    ResetColor,
+                );
+            }
+        } else if phasel == ProcPhase::MERGE as isize {
+            let cur = merge_status.current.load(Relaxed);
+            let tot = merge_status.total.load(Relaxed);
+            if tot > 0 {
+                let per = (cur as f64 / tot as f64)*100.0;
+                
+                eprint!("{}{}Merging map entries {} of {}  {:.2}% complete{}{}", 
+                    Clear(CurrentLine),
+                    SetForegroundColor(Color::Green),
+                    cur, tot, per, return_or_not, ResetColor);
+            } else {
+                eprint!("{}{}Merging map ....{}{}", 
+                    Clear(CurrentLine),
+                    SetForegroundColor(Color::Green),
+                    return_or_not, ResetColor);
+            }
+
+        } else if phasel == ProcPhase::SORT as isize {
+            eprint!("{}{}Sorting... {}{}", Clear(CurrentLine), SetForegroundColor(Color::Green), return_or_not, ResetColor);
+        } 
     }
-    eprint!("                                                                             \r");
+    eprint!("\r{}", Clear(CurrentLine));
+}
+
+enum ProcPhase{
+    SETUP=0isize,
+    READ=1isize,
+    SORT=2isize,
+    MERGE=3isize,
+    OUTPUT=4isize,
 }
 
 fn type_name_of<T: core::any::Any>(_t: &T) -> &str {
@@ -139,8 +172,12 @@ fn type_name_of<T: core::any::Any>(_t: &T) -> &str {
 }
 
 fn csv() -> Result<(), Box<dyn std::error::Error>> {
+    
+    let mut phase = Arc::new(AtomicIsize::new(ProcPhase::SETUP as isize));
+
     let start_f = Instant::now();
     let startcpu = ProcessTime::now();
+
 
     let cfg = get_cli()?;
 
@@ -175,6 +212,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
 
     let do_stdin = cfg.files.is_empty() && cfg.walk.is_none();
     let mut io_status = Arc::new(IoSlicerStatus::new());
+    let mut merge_status = Arc::new(MergeStatus::new());
 
     let (send_blocks, recv_blocks): (crossbeam_channel::Sender<Vec<u8>>, crossbeam_channel::Receiver<Vec<u8>>) = crossbeam_channel::unbounded();
     if !cfg.recycle_io_blocks_disable {
@@ -254,13 +292,16 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
             let mut io_status_cloned = io_status.clone();
             let clone_send = send_fileslice.clone();
             let clone_pathsend = send_pathbuff.clone();
+            let phase_c = phase.clone();
+            let merge_status = merge_status.clone();
             let verbose = cfg.verbose;
-            Some(thread::spawn(move || stat_ticker(verbose, thread_stopper, &mut io_status_cloned, &clone_send, &clone_pathsend)))
+            Some(thread::spawn(move || stat_ticker(verbose, thread_stopper, &mut io_status_cloned, &merge_status, &phase_c, &clone_send, &clone_pathsend)))
         } else {
             None
         }
     };
 
+    phase.store(ProcPhase::READ as isize, Relaxed);
     //
     // FILE - setup feed by the source of data
     //
@@ -289,7 +330,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
                 .unwrap_or_else(|_| eprintln!("Unable to send path: {} to path queue", pathbuf.display()));
         }
     } else if do_stdin {
-        eprintln!("{}", "<<< reading from stdin".red());
+        eprintln!("{}{}{}",SetForegroundColor(Color::Blue), "<<< reading from stdin", ResetColor);
         let stdin = std::io::stdin();
         let mut handle = stdin; // .lock();
         let empty_vec: Vec<String> = Vec::new();
@@ -349,7 +390,11 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
     // proc workers on slices can ONLY be told to stop AFTER the IO threads are done
     for _i in 0..cfg.parse_threads {
         send_fileslice.send(None)?;
+    
     }
+    
+    phase.store(ProcPhase::MERGE as isize, Relaxed);
+
     // merge the data from the workers
     let mut all_the_maps = vec![];
     for h in worker_handlers {
@@ -361,7 +406,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         all_the_maps.push(map);
     }
     let main_map = if !cfg.no_output {
-        sum_maps(&mut all_the_maps, cfg.verbose, &cfg)
+        sum_maps(&mut all_the_maps, cfg.verbose, &cfg, &mut merge_status)
     } else {
         create_map()
     };
@@ -451,7 +496,11 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
+
     if !cfg.disable_key_sort {
+        
+        phase.store(ProcPhase::SORT as isize, Relaxed);
+
         let cpu_keysort_s = ProcessTime::now();
         if cfg.count_dsc {
             thekeys.sort_unstable_by(|l, r| { count_cmp_dsc(&l.as_str(), &r.as_str()) });
@@ -467,6 +516,7 @@ fn csv() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    phase.store(ProcPhase::OUTPUT as isize, Relaxed);
     let alias = |field: usize, del: char| -> String {
         match &cfg.field_aliases {
             None => return field.to_string(),

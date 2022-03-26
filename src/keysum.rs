@@ -1,7 +1,9 @@
 use std::collections::{HashMap, BTreeMap};
+use std::sync::Arc;
 use std::time::Instant;
 use crate::cli::CliCfg;
 use crate::{KEY_DEL, MyMap};
+use crate::gen::MergeStatus;
 use std::cmp::{min, max};
 use prettytable::Table;
 use itertools::Itertools;
@@ -408,14 +410,19 @@ fn merge_string<'a, F>(old: &'a mut Option<String>, new: &'a mut Option<String>,
     }
 }
 
-pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg) -> MyMap {
+pub fn sum_maps(maps: &mut Vec<MyMap>, verbose: usize, cfg: &CliCfg, merge_status: &mut Arc<MergeStatus>) -> MyMap {
     let start = Instant::now();
     let lens = join(maps.iter().map(|x:&MyMap| x.len().to_string()), ",");
 
     let mut p_map = maps.remove(0);
     use itertools::join;
+
+    let tot_merge_iterms:usize = maps.iter().map(|m| m.len()).sum();
+    merge_status.total.store(tot_merge_iterms, std::sync::atomic::Ordering::Relaxed);
+    merge_status.current.store(0, std::sync::atomic::Ordering::Relaxed);
     for i in 0..maps.len() {
         for (k, old) in maps.get_mut(i).unwrap() {
+            merge_status.current.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let new = p_map.entry(k.to_string()).or_insert(
                 {
                     KeySum::new(old.nums.len(), old.strs.len(), old.distinct.len(),
